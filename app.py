@@ -12,7 +12,7 @@ def safe_completion_pct(planned, demand):
 import io
 import os
 import json
-from datetime import datetime
+from datetime import datetime, date as dt_date
 from pathlib import Path
 
 try:
@@ -39,7 +39,7 @@ except Exception:
 
 
 st.set_page_config(
-    page_title="Gyártási Diagnosztika PRO Supabase.7.5.4.4.3.3.2.2",
+    page_title="Gyártási Diagnosztika PRO SaaS SaaS.7.5.4.4.3.3.2.2",
     page_icon="🏭",
     layout="wide"
 )
@@ -1044,7 +1044,7 @@ def build_pdf_report(
     fedezet_m = fedezet / 1_000_000
 
     story = []
-    story.append(Paragraph("Gyártási Diagnosztika PRO Supabase.7 - vezetői riport", title_style))
+    story.append(Paragraph("Gyártási Diagnosztika PRO SaaS SaaS.7 - vezetői riport", title_style))
     story.append(P("Rövid döntéstámogató riport: fő megállapítások, javítási potenciál, dolgozó-gép párosítások."))
     story.append(Spacer(1, 0.20 * cm))
 
@@ -2085,7 +2085,7 @@ def check_password():
     if st.session_state.password_ok:
         return True
 
-    st.markdown("## 🔐 Gyártási Diagnosztika PRO Supabase")
+    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS SaaS")
     st.caption("Tesztjelszó alapértelmezetten: demo-pro-123. Élesben Streamlit Secrets: APP_PASSWORD.")
     pw = st.text_input("Jelszó", type="password")
     if st.button("Belépés"):
@@ -2196,11 +2196,136 @@ def build_pro_kpi_snapshot(filtered, default_fulfillment_df=None, default_capaci
         "javitasi_potencial_ft": (advisor_scores or {}).get("Profitveszteség_Ft", None),
     }
 
+
+# ------------------------------------------------------------
+# PRO SaaS: Supabase Auth + cég + előfizetés
+# ------------------------------------------------------------
+def restore_auth_session(sb):
+    if st.session_state.get("access_token") and st.session_state.get("refresh_token"):
+        try:
+            sb.auth.set_session(st.session_state["access_token"], st.session_state["refresh_token"])
+        except Exception:
+            pass
+
+
+def logout_pro():
+    for k in ["pro_user", "access_token", "refresh_token", "company_context", "readonly_mode"]:
+        st.session_state.pop(k, None)
+    st.rerun()
+
+
+def login_required_pro():
+    sb = get_supabase_client()
+    if sb is None:
+        st.error("Supabase nincs beállítva. Add meg a SUPABASE_URL és SUPABASE_ANON_KEY értékeket a Streamlit Secrets-ben.")
+        st.stop()
+
+    restore_auth_session(sb)
+
+    if st.session_state.get("pro_user"):
+        return sb, st.session_state["pro_user"]
+
+    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS SaaS")
+    st.caption("Előfizetőknek: belépés email + jelszóval. Fiókot az admin hoz létre az ügyfélnek.")
+    email = st.text_input("Email", key="pro_login_email")
+    password = st.text_input("Jelszó", type="password", key="pro_login_password")
+
+    if st.button("Belépés", use_container_width=True):
+        try:
+            res = sb.auth.sign_in_with_password({"email": email, "password": password})
+            st.session_state["pro_user"] = {"id": res.user.id, "email": res.user.email}
+            st.session_state["access_token"] = res.session.access_token
+            st.session_state["refresh_token"] = res.session.refresh_token
+            st.rerun()
+        except Exception as exc:
+            st.error(f"Belépés sikertelen: {exc}")
+
+    st.info("Nincs fiókod? Kérj PRO hozzáférést az üzemeltetőtől.")
+    st.stop()
+
+
+def load_company_context(sb, user_id: str):
+    try:
+        res = (
+            sb.table("company_users")
+            .select("role, company_id, companies(id, company_name, plan, valid_until, status)")
+            .eq("user_id", user_id)
+            .execute()
+        )
+        rows = res.data or []
+    except Exception as exc:
+        st.error(f"Céges jogosultság betöltése sikertelen: {exc}")
+        st.stop()
+
+    if not rows:
+        st.error("Ehhez a felhasználóhoz nincs cég jogosultság rendelve. Kérd az adminisztrátortól.")
+        st.stop()
+
+    row = rows[0]
+    company = row.get("companies") or {}
+    return {
+        "company_id": company.get("id") or row.get("company_id"),
+        "company_name": company.get("company_name", "Ismeretlen cég"),
+        "plan": company.get("plan", "PRO"),
+        "valid_until": company.get("valid_until"),
+        "status": company.get("status", "active"),
+        "role": row.get("role", "user"),
+    }
+
+
+def subscription_state(ctx):
+    status = str(ctx.get("status", "active")).lower()
+    valid_until_raw = ctx.get("valid_until")
+
+    if status not in ["active", "trial"]:
+        return True, f"Az előfizetés állapota: {status}. Csak megtekintés engedélyezett."
+
+    if not valid_until_raw:
+        return False, "Nincs lejárati dátum beállítva."
+
+    try:
+        valid_until = dt_date.fromisoformat(str(valid_until_raw)[:10])
+        today = dt_date.today()
+        if valid_until < today:
+            return True, f"Az előfizetés lejárt: {valid_until}. A korábbi adatok megtekinthetők, új mentés nem engedélyezett."
+        return False, f"Előfizetés érvényes: {valid_until} ({(valid_until - today).days} nap van hátra)."
+    except Exception:
+        return False, f"Előfizetés érvényes dátumként nem értelmezhető: {valid_until_raw}"
+
+
+def load_company_history(company=None):
+    client = get_supabase_client()
+    if client is None:
+        return pd.DataFrame()
+
+    ctx = st.session_state.get("company_context", {})
+    company_id = ctx.get("company_id")
+    if not company_id:
+        return pd.DataFrame()
+
+    res = (
+        client
+        .table("production_snapshots")
+        .select("*")
+        .eq("company_id", company_id)
+        .order("week")
+        .execute()
+    )
+    return pd.DataFrame(res.data or [])
+
+
+sb, pro_user = login_required_pro()
+company_context = load_company_context(sb, pro_user["id"])
+readonly_mode, subscription_message = subscription_state(company_context)
+st.session_state["company_context"] = company_context
+st.session_state["readonly_mode"] = readonly_mode
+
+
 # ------------------------------------------------------------
 # Header
 # ------------------------------------------------------------
-st.markdown('<div class="main-title">🏭 Gyártási Diagnosztika PRO Supabase</div>', unsafe_allow_html=True)
-st.markdown('<div class="subtitle">Jelszavas, Supabase-alapú PRO verzió: tartós többhetes trendek, mentett riportok, akcióterv és what-if döntéstámogatás.</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">🏭 Gyártási Diagnosztika PRO SaaS SaaS</div>', unsafe_allow_html=True)
+st.markdown('<div class="subtitle">PRO SaaS verzió: emailes belépés, céges jogosultság, előfizetés-kezelés, tartós többhetes trendek és read-only mód lejárat után.</div>', unsafe_allow_html=True)
 
 
 # ------------------------------------------------------------
@@ -2219,6 +2344,10 @@ if uploaded is None:
     st.info("Tölts fel egy Excelt a kezdéshez. A demó fájl: Gyartasi_Diagnosztika_Demo.xlsx")
     st.stop()
 
+
+
+if readonly_mode:
+    st.warning("READ-ONLY mód: az előfizetés lejárt vagy inaktív. A korábbi adatok megtekinthetők, de új mentés nem engedélyezett.")
 
 # ------------------------------------------------------------
 # Adatbetöltés
@@ -2241,10 +2370,23 @@ except Exception as exc:
 
 
 
+
 with st.sidebar:
     st.markdown("---")
+    st.subheader("PRO előfizetés")
+    st.write(f"Belépve: **{pro_user.get('email','')}**")
+    st.write(f"Cég: **{company_context.get('company_name','')}**")
+    st.write(f"Csomag: **{company_context.get('plan','PRO')}**")
+    if readonly_mode:
+        st.error(subscription_message)
+    else:
+        st.success(subscription_message)
+    if st.button("Kijelentkezés", use_container_width=True):
+        logout_pro()
+
+    st.markdown("---")
     st.subheader("PRO mentés")
-    company_name = st.text_input("Cégnév / projekt", value="Demo Kft.")
+    company_name = company_context.get("company_name", "Cég")
     week_label = st.text_input("Időszak címkéje", value=datetime.now().strftime("%Y-W%U"))
 
 
@@ -2787,7 +2929,7 @@ with tabs[8]:
 
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("Aktuális elemzés mentése", use_container_width=True):
+        if st.button("Aktuális elemzés mentése", use_container_width=True, disabled=readonly_mode):
             path = save_week_snapshot(company_name, week_label, current_snapshot, uploaded.name if uploaded else "")
             st.success("Mentve Supabase-be.")
     with c2:
