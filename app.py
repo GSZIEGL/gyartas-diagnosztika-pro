@@ -39,7 +39,7 @@ except Exception:
 
 
 st.set_page_config(
-    page_title="Gyártási Diagnosztika PRO SaaS V2 V2 SaaS.7.5.4.4.3.3.2.2",
+    page_title="Gyártási Diagnosztika PRO SaaS V3 V2 SaaS.7.5.4.4.3.3.2.2",
     page_icon="🏭",
     layout="wide"
 )
@@ -424,7 +424,7 @@ def build_action_plan(df: pd.DataFrame, pair: pd.DataFrame, impact_df: pd.DataFr
 
 
 def build_trend_insights(history_df: pd.DataFrame) -> List[Tuple[str, str]]:
-    """PRO V2: vezetői trendmegállapítások több időszak alapján."""
+    """PRO V3: vezetői trendmegállapítások több időszak alapján."""
     if history_df is None or history_df.empty or len(history_df) < 2:
         return [("info", "Ments el legalább két időszakot, hogy trendmegállapítás készüljön.")]
 
@@ -1179,7 +1179,7 @@ def build_pdf_report(
     fedezet_m = fedezet / 1_000_000
 
     story = []
-    story.append(Paragraph("Gyártási Diagnosztika PRO SaaS V2 V2 SaaS.7 - vezetői riport", title_style))
+    story.append(Paragraph("Gyártási Diagnosztika PRO SaaS V3 V2 SaaS.7 - vezetői riport", title_style))
     story.append(P("Rövid döntéstámogató riport: fő megállapítások, javítási potenciál, dolgozó-gép párosítások."))
     story.append(Spacer(1, 0.20 * cm))
 
@@ -2220,7 +2220,7 @@ def check_password():
     if st.session_state.password_ok:
         return True
 
-    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS V2 V2 SaaS")
+    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS V3 V2 SaaS")
     st.caption("Tesztjelszó alapértelmezetten: demo-pro-123. Élesben Streamlit Secrets: APP_PASSWORD.")
     pw = st.text_input("Jelszó", type="password")
     if st.button("Belépés"):
@@ -2264,30 +2264,53 @@ def get_supabase_client():
 
 
 def save_week_snapshot(company, week_label, kpis, uploaded_name=""):
-    """PRO mentés Supabase-be.
+    """PRO V3: biztonságosabb Supabase mentés + részletes hibaüzenet."""
+    if st.session_state.get("readonly_mode"):
+        raise RuntimeError("Az előfizetés lejárt vagy inaktív. Új mentés nem engedélyezett.")
 
-    Egy cég + hét kombinációra upsertelünk, tehát ugyanaz a hét felülírható.
-    """
     client = get_supabase_client()
     if client is None:
-        raise RuntimeError("Supabase nincs beállítva. Add meg a SUPABASE_URL és SUPABASE_ANON_KEY értékeket a Streamlit Secrets-ben.")
+        raise RuntimeError("Supabase nincs beállítva.")
 
-    payload = {
-        "company": company,
-        "week": week_label,
-        "uploaded_name": uploaded_name,
-        "saved_at": datetime.now().isoformat(timespec="seconds"),
-        **kpis,
+    ctx = st.session_state.get("company_context", {})
+    user = st.session_state.get("pro_user", {})
+
+    allowed = {
+        "gyartott_db", "selejt_pct", "oee", "allasido_perc", "becsult_fedezet",
+        "rendeles_teljesites_pct", "max_kapacitas_pct", "egeszsegpont", "javitasi_potencial_ft"
     }
 
-    result = (
-        client
-        .table("production_snapshots")
-        .upsert(payload, on_conflict="company,week")
-        .execute()
-    )
-    return result
+    clean_kpis = {}
+    for k, v in (kpis or {}).items():
+        if k not in allowed:
+            continue
+        try:
+            clean_kpis[k] = None if pd.isna(v) else float(v)
+        except Exception:
+            clean_kpis[k] = None
 
+    payload = {
+        "company_id": ctx.get("company_id"),
+        "company": ctx.get("company_name") or company,
+        "user_id": user.get("id"),
+        "week": str(week_label),
+        "uploaded_name": uploaded_name or "",
+        "saved_at": datetime.now().isoformat(timespec="seconds"),
+        **clean_kpis,
+    }
+
+    try:
+        return (
+            client
+            .table("production_snapshots")
+            .upsert(payload, on_conflict="company_id,week")
+            .execute()
+        )
+    except Exception as exc:
+        st.error("Supabase mentési hiba.")
+        st.code(str(exc))
+        st.info("Futtasd le a supabase_fix_pro_v3.sql fájlt a Supabase SQL Editorban, majd próbáld újra.")
+        raise
 
 def load_company_history(company):
     """Korábbi hetek betöltése Supabase-ből."""
@@ -2360,7 +2383,7 @@ def login_required_pro():
     if st.session_state.get("pro_user"):
         return sb, st.session_state["pro_user"]
 
-    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS V2 V2 SaaS")
+    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS V3 V2 SaaS")
     st.caption("Előfizetőknek: belépés email + jelszóval. Fiókot az admin hoz létre az ügyfélnek.")
     email = st.text_input("Email", key="pro_login_email")
     password = st.text_input("Jelszó", type="password", key="pro_login_password")
@@ -2480,7 +2503,7 @@ st.session_state["readonly_mode"] = readonly_mode
 # ------------------------------------------------------------
 # Header
 # ------------------------------------------------------------
-st.markdown('<div class="main-title">🏭 Gyártási Diagnosztika PRO SaaS V2 V2 SaaS</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">🏭 Gyártási Diagnosztika PRO SaaS V3 V2 SaaS</div>', unsafe_allow_html=True)
 st.markdown('<div class="subtitle">PRO SaaS verzió: emailes belépés, céges jogosultság, előfizetés-kezelés, tartós többhetes trendek és read-only mód lejárat után.</div>', unsafe_allow_html=True)
 
 
@@ -3075,8 +3098,8 @@ with tabs[7]:
 # 9. PRO trendek
 # ------------------------------------------------------------
 with tabs[8]:
-    st.subheader("PRO V2 trendmotor és mentett riportok")
-    st.caption("A DEMO egyszeri képet ad. A PRO V2 több időszak alapján mutatja: javulás, romlás, trend, előző időszakhoz képesti eltérés.")
+    st.subheader("PRO V3 trendmotor és mentett riportok")
+    st.caption("A DEMO egyszeri képet ad. A PRO V3 több időszak alapján mutatja: javulás, romlás, trend, előző időszakhoz képesti eltérés.")
 
     current_snapshot = build_pro_kpi_snapshot(
         filtered,
@@ -3113,7 +3136,7 @@ with tabs[8]:
         else:
             st.dataframe(delta_df, use_container_width=True, hide_index=True)
 
-        st.markdown("### PRO V2 automatikus trendértékelés")
+        st.markdown("### PRO V3 automatikus trendértékelés")
         render_recommendations(build_trend_insights(hist))
 
         st.markdown("### Trenddiagramok")
