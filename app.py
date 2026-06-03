@@ -39,7 +39,7 @@ except Exception:
 
 
 st.set_page_config(
-    page_title="Gyártási Diagnosztika PRO SaaS V4 V4.1 V2 SaaS.7.5.4.4.3.3.2.2",
+    page_title="Gyártási Diagnosztika PRO SaaS V5 V4.1 V2 SaaS.7.5.4.4.3.3.2.2",
     page_icon="🏭",
     layout="wide"
 )
@@ -423,8 +423,106 @@ def build_action_plan(df: pd.DataFrame, pair: pd.DataFrame, impact_df: pd.DataFr
 
 
 
+
+def build_assignment_delta(base_assignment: pd.DataFrame, opt_assignment: pd.DataFrame) -> pd.DataFrame:
+    """Alap vs optimalizált beosztás eltérésének vezetői értelmezése."""
+    if base_assignment is None or opt_assignment is None or base_assignment.empty or opt_assignment.empty:
+        return pd.DataFrame()
+
+    left = base_assignment.copy()
+    right = opt_assignment.copy()
+
+    # Normalize column names
+    if "Dolgozó" in left.columns:
+        left = left.rename(columns={"Dolgozó": "Alap_dolgozó"})
+    if "Ajánlott dolgozó" in right.columns:
+        right = right.rename(columns={"Ajánlott dolgozó": "Optimalizált_dolgozó"})
+    elif "Dolgozó" in right.columns:
+        right = right.rename(columns={"Dolgozó": "Optimalizált_dolgozó"})
+
+    keep_left = [c for c in ["Gép", "Alap_dolgozó", "Kompatibilitási_pont", "Átlag_teljesítmény", "Selejt_%"] if c in left.columns]
+    keep_right = [c for c in ["Gép", "Optimalizált_dolgozó", "Kompatibilitási_pont", "Várható_teljesítmény_%", "Várható_selejt_%"] if c in right.columns]
+
+    merged = left[keep_left].merge(right[keep_right], on="Gép", how="outer", suffixes=("_alap", "_opt"))
+
+    def col(df, name, fallback=None):
+        if name in df.columns:
+            return pd.to_numeric(df[name], errors="coerce").fillna(0)
+        if fallback is not None and fallback in df.columns:
+            return pd.to_numeric(df[fallback], errors="coerce").fillna(0)
+        return pd.Series([0]*len(df), index=df.index)
+
+    base_perf = col(merged, "Átlag_teljesítmény")
+    opt_perf = col(merged, "Várható_teljesítmény_%")
+    base_scrap = col(merged, "Selejt_%")
+    opt_scrap = col(merged, "Várható_selejt_%")
+
+    merged["Teljesítmény_hatás_pont"] = (opt_perf - base_perf).round(1)
+    merged["Selejt_hatás_pont"] = (opt_scrap - base_scrap).round(2)
+    merged["Váltás"] = merged.apply(
+        lambda r: "Nincs váltás" if str(r.get("Alap_dolgozó","")) == str(r.get("Optimalizált_dolgozó","")) else "Váltás javasolt",
+        axis=1
+    )
+    return merged
+
+
+def build_what_if_summary(pair: pd.DataFrame, unavailable_workers=None, unavailable_machines=None) -> pd.DataFrame:
+    """Egyszerű what-if: kieső dolgozó/gép esetén alternatív párosítási javaslatok."""
+    if pair is None or pair.empty:
+        return pd.DataFrame()
+    unavailable_workers = set(unavailable_workers or [])
+    unavailable_machines = set(unavailable_machines or [])
+
+    work = pair.copy()
+    if unavailable_workers:
+        work = work[~work["Dolgozó"].isin(unavailable_workers)]
+    if unavailable_machines:
+        work = work[~work["Gép"].isin(unavailable_machines)]
+    if work.empty:
+        return pd.DataFrame()
+
+    rows = []
+    for machine, g in work.groupby("Gép"):
+        best = g.sort_values("Kompatibilitási_pont", ascending=False).iloc[0]
+        rows.append({
+            "Gép": machine,
+            "Ajánlott_dolgozó": best.get("Dolgozó"),
+            "Kompatibilitási_pont": round(float(best.get("Kompatibilitási_pont", 0)), 1),
+            "Várható_teljesítmény_%": round(float(best.get("Átlag_teljesítmény", 0)), 1),
+            "Várható_selejt_%": round(float(best.get("Selejt_%", 0)), 2),
+            "Megjegyzés": "Alternatív beosztás kiesés esetére" if unavailable_workers or unavailable_machines else "Normál ajánlott párosítás"
+        })
+    return pd.DataFrame(rows).sort_values("Gép")
+
+
+def build_recommender_quality_notes(base_assignment: pd.DataFrame, opt_assignment: pd.DataFrame, pair: pd.DataFrame) -> List[Tuple[str, str]]:
+    """Rövid megállapítások arról, hogy az ajánlórendszer mit változtatna."""
+    notes = []
+    delta = build_assignment_delta(base_assignment, opt_assignment)
+    if delta.empty:
+        return [("info", "Az ajánlórendszerhez nincs elég dolgozó-gép adat.")]
+
+    changes = delta[delta["Váltás"].eq("Váltás javasolt")]
+    if not changes.empty:
+        notes.append(("warning", f"Az optimalizáló {len(changes)} gépnél javasolna más dolgozót az alap beosztáshoz képest."))
+        best = changes.sort_values("Teljesítmény_hatás_pont", ascending=False).iloc[0]
+        notes.append(("success", f"Legnagyobb várható teljesítményhatás: {best.get('Gép')} → {best.get('Optimalizált_dolgozó')} ({best.get('Teljesítmény_hatás_pont')} pont)."))
+    else:
+        notes.append(("success", "Az alap beosztás közel van az optimalizált javaslathoz; kevés váltás indokolt."))
+
+    if "Selejt_hatás_pont" in delta.columns:
+        best_scrap = delta.sort_values("Selejt_hatás_pont").iloc[0]
+        notes.append(("info", f"Legjobb selejtirányú javaslat: {best_scrap.get('Gép')} → {best_scrap.get('Optimalizált_dolgozó')} ({best_scrap.get('Selejt_hatás_pont')} százalékpont)."))
+
+    if pair is not None and not pair.empty:
+        top = pair.sort_values("Kompatibilitási_pont", ascending=False).head(1).iloc[0]
+        notes.append(("success", f"Legerősebb páros: {top.get('Dolgozó')} + {top.get('Gép')} ({float(top.get('Kompatibilitási_pont',0)):.0f} pont)."))
+
+    return notes[:5]
+
+
 def build_trend_insights(history_df: pd.DataFrame) -> List[Tuple[str, str]]:
-    """PRO V4: vezetői trendmegállapítások több időszak alapján."""
+    """PRO V5: vezetői trendmegállapítások több időszak alapján."""
     if history_df is None or history_df.empty or len(history_df) < 2:
         return [("info", "Ments el legalább két időszakot, hogy trendmegállapítás készüljön.")]
 
@@ -1132,6 +1230,36 @@ def make_pdf_top_pairs_table(pair, width=500):
     return t
 
 
+
+def make_pdf_assignment_table(title, df, columns=None, limit=10):
+    story = []
+    story.extend(pdf_section_header(title))
+    if df is None or df.empty:
+        story.append(Paragraph("Nincs elég adat ehhez a szakaszhoz.", ParagraphStyle("Empty", fontSize=8)))
+        return story
+    show = df.copy().head(limit)
+    if columns:
+        cols = [c for c in columns if c in show.columns]
+        show = show[cols] if cols else show
+    data = [list(show.columns)] + show.astype(str).values.tolist()
+    cell_style = ParagraphStyle("SmallTbl", fontSize=7.0, leading=8.2, textColor=colors.HexColor("#0f172a"))
+    table = Table([[Paragraph(str(c), cell_style) for c in row] for row in data], repeatRows=1)
+    style = [
+        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#0f172a")),
+        ("TEXTCOLOR", (0,0), (-1,0), colors.white),
+        ("GRID", (0,0), (-1,-1), 0.25, colors.HexColor("#cbd5e1")),
+        ("VALIGN", (0,0), (-1,-1), "TOP"),
+        ("TOPPADDING", (0,0), (-1,-1), 4),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 4),
+    ]
+    for i in range(1, len(data)):
+        style.append(("BACKGROUND", (0,i), (-1,i), colors.HexColor("#f8fafc" if i % 2 else "#eef2ff")))
+    table.setStyle(TableStyle(style))
+    story.append(table)
+    story.append(Spacer(1, 0.18*cm))
+    return story
+
+
 def build_pdf_report(
     df: pd.DataFrame,
     pair: pd.DataFrame,
@@ -1179,7 +1307,7 @@ def build_pdf_report(
     fedezet_m = fedezet / 1_000_000
 
     story = []
-    story.append(Paragraph("Gyártási Diagnosztika PRO SaaS V4 V4.1 V2 SaaS.7 - vezetői riport", title_style))
+    story.append(Paragraph("Gyártási Diagnosztika PRO SaaS V5 V4.1 V2 SaaS.7 - vezetői riport", title_style))
     story.append(P("Rövid döntéstámogató riport: fő megállapítások, javítási potenciál, dolgozó-gép párosítások."))
     story.append(Spacer(1, 0.20 * cm))
 
@@ -1237,6 +1365,38 @@ def build_pdf_report(
         for _, act in action_plan_df.head(3).iterrows():
             story.append(make_pdf_action_card(act))
             story.append(Spacer(1, 0.06 * cm))
+
+
+    # PRO V5: ajánlórendszer / optimalizáló / what-if oldalak
+    try:
+        story.append(PageBreak())
+        story.extend(pdf_section_header("Ajánlórendszer és beosztási javaslat", "Ez a rész a DEMO-ban nem érhető el: dolgozó-gép párosítás, optimalizálás és kiesési forgatókönyv."))
+        story.append(compact_insight_table(build_recommender_quality_notes(assignment, assignment, pair), max_items=5))
+        story.append(Spacer(1, 0.15*cm))
+        story.extend(make_pdf_assignment_table(
+            "Alap javasolt beosztás",
+            assignment,
+            ["Gép", "Dolgozó", "Kompatibilitási_pont", "Átlag_teljesítmény", "Selejt_%"],
+            limit=12
+        ))
+
+        what_if_pdf_df = build_what_if_summary(pair)
+        story.extend(make_pdf_assignment_table(
+            "Mi lenne ha? / alternatív párosítási alap",
+            what_if_pdf_df,
+            ["Gép", "Ajánlott_dolgozó", "Kompatibilitási_pont", "Várható_teljesítmény_%", "Várható_selejt_%", "Megjegyzés"],
+            limit=12
+        ))
+
+        delta_pdf_df = build_assignment_delta(assignment, what_if_pdf_df.rename(columns={"Ajánlott_dolgozó": "Ajánlott dolgozó"}))
+        story.extend(make_pdf_assignment_table(
+            "Alap vs optimalizált eltérés",
+            delta_pdf_df,
+            ["Gép", "Alap_dolgozó", "Optimalizált_dolgozó", "Teljesítmény_hatás_pont", "Selejt_hatás_pont", "Váltás"],
+            limit=12
+        ))
+    except Exception as exc:
+        story.append(Paragraph(f"Az ajánlórendszer PDF szakasza nem készült el: {pdf_safe_text(str(exc))}", ParagraphStyle("Empty", fontSize=8)))
 
     doc.build(story)
     return buffer.getvalue()
@@ -2220,7 +2380,7 @@ def check_password():
     if st.session_state.password_ok:
         return True
 
-    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS V4 V4.1 V2 SaaS")
+    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS V5 V4.1 V2 SaaS")
     st.caption("Tesztjelszó alapértelmezetten: demo-pro-123. Élesben Streamlit Secrets: APP_PASSWORD.")
     pw = st.text_input("Jelszó", type="password")
     if st.button("Belépés"):
@@ -2280,7 +2440,7 @@ def get_supabase_data_client():
     return create_client(url, key)
 
 def save_week_snapshot(company, week_label, kpis, uploaded_name=""):
-    """PRO V4: Supabase mentés service role data clienttel, ha elérhető."""
+    """PRO V5: Supabase mentés service role data clienttel, ha elérhető."""
     if st.session_state.get("readonly_mode"):
         raise RuntimeError("Az előfizetés lejárt vagy inaktív. Új mentés nem engedélyezett.")
 
@@ -2406,7 +2566,7 @@ def login_required_pro():
     if st.session_state.get("pro_user"):
         return sb, st.session_state["pro_user"]
 
-    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS V4 V4.1 V2 SaaS")
+    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS V5 V4.1 V2 SaaS")
     st.caption("Előfizetőknek: belépés email + jelszóval. Fiókot az admin hoz létre az ügyfélnek.")
     email = st.text_input("Email", key="pro_login_email")
     password = st.text_input("Jelszó", type="password", key="pro_login_password")
@@ -2537,7 +2697,7 @@ st.session_state["readonly_mode"] = readonly_mode
 # ------------------------------------------------------------
 # Header
 # ------------------------------------------------------------
-st.markdown('<div class="main-title">🏭 Gyártási Diagnosztika PRO SaaS V4 V4.1 V2 SaaS</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">🏭 Gyártási Diagnosztika PRO SaaS V5 V4.1 V2 SaaS</div>', unsafe_allow_html=True)
 st.markdown('<div class="subtitle">PRO SaaS verzió: emailes belépés, céges jogosultság, előfizetés-kezelés, tartós többhetes trendek és read-only mód lejárat után.</div>', unsafe_allow_html=True)
 
 
@@ -2694,6 +2854,8 @@ default_fulfillment_summary = summarize_plan_by_product(default_plan_df, default
 lost_revenue_df = estimate_lost_revenue_by_product(default_fulfillment_summary, df=filtered)
 causal_chain_df = build_causal_chain(default_plan_df, default_fulfillment_df, pair, default_capacity_df, filtered) if "default_plan_df" in globals() else pd.DataFrame()
 critical_orders_df = build_top_critical_orders(orders_df, default_plan_df) if "orders_df" in globals() else pd.DataFrame()
+
+optimized_assignment = assignment.copy() if 'assignment' in globals() else pd.DataFrame()
 
 # ------------------------------------------------------------
 # Tabok
@@ -2934,6 +3096,21 @@ with tabs[5]:
     else:
         st.dataframe(optimized, use_container_width=True, hide_index=True)
 
+
+    st.markdown("### Ajánlórendszer értékelése")
+    reco_notes = build_recommender_quality_notes(assignment, optimized_assignment if "optimized_assignment" in globals() else assignment, pair)
+    render_recommendations(reco_notes)
+
+    st.markdown("### Alap vs optimalizált eltérés")
+    try:
+        delta_assignment_df = build_assignment_delta(assignment, optimized_assignment if "optimized_assignment" in globals() else assignment)
+        if delta_assignment_df.empty:
+            st.info("Nincs eltérés vagy nincs elég adat az összehasonlításhoz.")
+        else:
+            st.dataframe(delta_assignment_df, use_container_width=True, hide_index=True)
+    except Exception as exc:
+        st.warning(f"Az eltéréstábla nem készült el: {exc}")
+
     st.markdown("### Várható hatás")
     scenario = compare_assignment_scenarios(pair, assignment, optimized)
     st.dataframe(scenario, use_container_width=True, hide_index=True)
@@ -3142,8 +3319,8 @@ with tabs[7]:
 # 9. PRO trendek
 # ------------------------------------------------------------
 with tabs[8]:
-    st.subheader("PRO V4 trendmotor és mentett riportok")
-    st.caption("A DEMO egyszeri képet ad. A PRO V4 több időszak alapján mutatja: javulás, romlás, trend, előző időszakhoz képesti eltérés.")
+    st.subheader("PRO V5 trendmotor és mentett riportok")
+    st.caption("A DEMO egyszeri képet ad. A PRO V5 több időszak alapján mutatja: javulás, romlás, trend, előző időszakhoz képesti eltérés.")
 
     current_snapshot = build_pro_kpi_snapshot(
         filtered,
@@ -3180,7 +3357,7 @@ with tabs[8]:
         else:
             st.dataframe(delta_df, use_container_width=True, hide_index=True)
 
-        st.markdown("### PRO V4 automatikus trendértékelés")
+        st.markdown("### PRO V5 automatikus trendértékelés")
         render_recommendations(build_trend_insights(hist))
 
         st.markdown("### Trenddiagramok")
