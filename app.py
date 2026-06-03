@@ -39,7 +39,7 @@ except Exception:
 
 
 st.set_page_config(
-    page_title="Gyártási Diagnosztika PRO SaaS SaaS.7.5.4.4.3.3.2.2",
+    page_title="Gyártási Diagnosztika PRO SaaS v2 SaaS.7.5.4.4.3.3.2.2",
     page_icon="🏭",
     layout="wide"
 )
@@ -1044,7 +1044,7 @@ def build_pdf_report(
     fedezet_m = fedezet / 1_000_000
 
     story = []
-    story.append(Paragraph("Gyártási Diagnosztika PRO SaaS SaaS.7 - vezetői riport", title_style))
+    story.append(Paragraph("Gyártási Diagnosztika PRO SaaS v2 SaaS.7 - vezetői riport", title_style))
     story.append(P("Rövid döntéstámogató riport: fő megállapítások, javítási potenciál, dolgozó-gép párosítások."))
     story.append(Spacer(1, 0.20 * cm))
 
@@ -2085,7 +2085,7 @@ def check_password():
     if st.session_state.password_ok:
         return True
 
-    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS SaaS")
+    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS v2 SaaS")
     st.caption("Tesztjelszó alapértelmezetten: demo-pro-123. Élesben Streamlit Secrets: APP_PASSWORD.")
     pw = st.text_input("Jelszó", type="password")
     if st.button("Belépés"):
@@ -2225,7 +2225,7 @@ def login_required_pro():
     if st.session_state.get("pro_user"):
         return sb, st.session_state["pro_user"]
 
-    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS SaaS")
+    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS v2 SaaS")
     st.caption("Előfizetőknek: belépés email + jelszóval. Fiókot az admin hoz létre az ügyfélnek.")
     email = st.text_input("Email", key="pro_login_email")
     password = st.text_input("Jelszó", type="password", key="pro_login_password")
@@ -2245,33 +2245,54 @@ def login_required_pro():
 
 
 def load_company_context(sb, user_id: str):
+    """Céges jogosultság betöltése stabil, kétlépcsős módon."""
     try:
-        res = (
+        membership_res = (
             sb.table("company_users")
-            .select("role, company_id, companies(id, company_name, plan, valid_until, status)")
+            .select("*")
             .eq("user_id", user_id)
             .execute()
         )
-        rows = res.data or []
+        rows = membership_res.data or []
     except Exception as exc:
         st.error(f"Céges jogosultság betöltése sikertelen: {exc}")
         st.stop()
 
     if not rows:
-        st.error("Ehhez a felhasználóhoz nincs cég jogosultság rendelve. Kérd az adminisztrátortól.")
+        st.error("Ehhez a felhasználóhoz nincs cég jogosultság rendelve.")
+        st.code(f"Belépett user_id: {user_id}")
+        st.info(
+            "Ezt az ID-t kell betenni a company_users.user_id mezőbe. "
+            "Ha a táblában más user_id van, akkor másik Supabase Auth felhasználóval léptél be, "
+            "vagy a Streamlit Secrets másik Supabase projektre mutat."
+        )
         st.stop()
 
     row = rows[0]
-    company = row.get("companies") or {}
+    company_id = row.get("company_id")
+
+    try:
+        company_res = (
+            sb.table("companies")
+            .select("*")
+            .eq("id", company_id)
+            .single()
+            .execute()
+        )
+        company = company_res.data or {}
+    except Exception as exc:
+        st.error(f"Cégadat betöltése sikertelen: {exc}")
+        st.code(f"company_id: {company_id}")
+        st.stop()
+
     return {
-        "company_id": company.get("id") or row.get("company_id"),
+        "company_id": company.get("id") or company_id,
         "company_name": company.get("company_name", "Ismeretlen cég"),
         "plan": company.get("plan", "PRO"),
         "valid_until": company.get("valid_until"),
         "status": company.get("status", "active"),
         "role": row.get("role", "user"),
     }
-
 
 def subscription_state(ctx):
     status = str(ctx.get("status", "active")).lower()
@@ -2324,7 +2345,7 @@ st.session_state["readonly_mode"] = readonly_mode
 # ------------------------------------------------------------
 # Header
 # ------------------------------------------------------------
-st.markdown('<div class="main-title">🏭 Gyártási Diagnosztika PRO SaaS SaaS</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">🏭 Gyártási Diagnosztika PRO SaaS v2 SaaS</div>', unsafe_allow_html=True)
 st.markdown('<div class="subtitle">PRO SaaS verzió: emailes belépés, céges jogosultság, előfizetés-kezelés, tartós többhetes trendek és read-only mód lejárat után.</div>', unsafe_allow_html=True)
 
 
