@@ -39,7 +39,7 @@ except Exception:
 
 
 st.set_page_config(
-    page_title="Gyártási Diagnosztika PRO SaaS v2 SaaS.7.5.4.4.3.3.2.2",
+    page_title="Gyártási Diagnosztika PRO SaaS V2 V2 SaaS.7.5.4.4.3.3.2.2",
     page_icon="🏭",
     layout="wide"
 )
@@ -419,6 +419,141 @@ def build_action_plan(df: pd.DataFrame, pair: pd.DataFrame, impact_df: pd.DataFr
     order={"Magas":0,"Közepes":1,"Alacsony":2}
     out["_sort"]=out["Prioritás"].map(order).fillna(9)
     return out.sort_values(["_sort","Becsült_hatás"],ascending=[True,False]).drop(columns=["_sort"]).head(8)
+
+
+
+
+def build_trend_insights(history_df: pd.DataFrame) -> List[Tuple[str, str]]:
+    """PRO V2: vezetői trendmegállapítások több időszak alapján."""
+    if history_df is None or history_df.empty or len(history_df) < 2:
+        return [("info", "Ments el legalább két időszakot, hogy trendmegállapítás készüljön.")]
+
+    h = history_df.sort_values("week").copy()
+    for col in ["oee", "selejt_pct", "allasido_perc", "javitasi_potencial_ft", "rendeles_teljesites_pct"]:
+        if col in h.columns:
+            h[col] = pd.to_numeric(h[col], errors="coerce")
+
+    first = h.iloc[0]
+    prev = h.iloc[-2]
+    last = h.iloc[-1]
+    notes = []
+
+    def delta(col):
+        if col not in h.columns or pd.isna(last.get(col)) or pd.isna(prev.get(col)):
+            return None
+        return float(last[col]) - float(prev[col])
+
+    d_oee = delta("oee")
+    if d_oee is not None:
+        notes.append(("success" if d_oee >= 0 else "warning", f"OEE előző időszakhoz képest: {d_oee:+.1f} pont."))
+
+    d_scrap = delta("selejt_pct")
+    if d_scrap is not None:
+        notes.append(("success" if d_scrap <= 0 else "danger", f"Selejt változás előző időszakhoz képest: {d_scrap:+.2f} százalékpont."))
+
+    d_down = delta("allasido_perc")
+    if d_down is not None:
+        notes.append(("success" if d_down <= 0 else "warning", f"Állásidő változás előző időszakhoz képest: {d_down:+.0f} perc."))
+
+    d_pot = delta("javitasi_potencial_ft")
+    if d_pot is not None:
+        notes.append(("success" if d_pot <= 0 else "warning", f"Javítási potenciál változás: {fmt_huf(d_pot)}. Ha nő, több pénz maradhat az asztalon."))
+
+    if "oee" in h.columns and h["oee"].notna().sum() >= 3:
+        last3 = h["oee"].dropna().tail(3).tolist()
+        if len(last3) == 3 and last3[0] > last3[1] > last3[2]:
+            notes.append(("danger", "Az OEE három egymást követő mentett időszakban romlott. Ez PRO szintű beavatkozási jel."))
+        elif len(last3) == 3 and last3[0] < last3[1] < last3[2]:
+            notes.append(("success", "Az OEE három egymást követő időszakban javult. Érdemes az aktuális működést standardizálni."))
+
+    return notes[:6]
+
+
+def build_prev_period_delta_table(history_df: pd.DataFrame) -> pd.DataFrame:
+    if history_df is None or history_df.empty or len(history_df) < 2:
+        return pd.DataFrame()
+    h = history_df.sort_values("week").copy()
+    metrics = [
+        ("OEE", "oee", "pont"),
+        ("Selejt %", "selejt_pct", "százalékpont"),
+        ("Állásidő", "allasido_perc", "perc"),
+        ("Rendelésteljesítés", "rendeles_teljesites_pct", "%"),
+        ("Javítási potenciál", "javitasi_potencial_ft", "Ft"),
+    ]
+    rows = []
+    prev = h.iloc[-2]
+    last = h.iloc[-1]
+    for label, col, unit in metrics:
+        if col not in h.columns:
+            continue
+        a = pd.to_numeric(pd.Series([prev.get(col)]), errors="coerce").iloc[0]
+        b = pd.to_numeric(pd.Series([last.get(col)]), errors="coerce").iloc[0]
+        if pd.isna(a) or pd.isna(b):
+            continue
+        diff = b - a
+        rows.append({
+            "Mutató": label,
+            "Előző": round(float(a), 2),
+            "Aktuális": round(float(b), 2),
+            "Változás": round(float(diff), 2),
+            "Egység": unit,
+        })
+    return pd.DataFrame(rows)
+
+
+def normalized_pair_score_table(pair_df: pd.DataFrame) -> pd.DataFrame:
+    """Dolgozó-gép mátrix 0-100 normalizált pontszámmal.
+
+    A korábbi abszolút pontozás miatt sok cella sárga/narancs lett.
+    Itt a legjobb párosok zöldek lesznek, mert a tényleges mezőnyön belüli relatív helyzetet is nézzük.
+    """
+    if pair_df is None or pair_df.empty or "Dolgozó" not in pair_df.columns or "Gép" not in pair_df.columns:
+        return pd.DataFrame()
+
+    work = pair_df.copy()
+    score_col = "Kompatibilitási_pont" if "Kompatibilitási_pont" in work.columns else None
+    if score_col is None:
+        return pd.DataFrame()
+
+    work[score_col] = pd.to_numeric(work[score_col], errors="coerce").fillna(0)
+    lo = float(work[score_col].min())
+    hi = float(work[score_col].max())
+    if hi > lo:
+        work["Relatív_pont"] = 45 + (work[score_col] - lo) / (hi - lo) * 55
+    else:
+        work["Relatív_pont"] = work[score_col]
+
+    # Ha az abszolút pont eleve magas, ne húzzuk le túlzottan.
+    work["Vizuális_pont"] = np.maximum(work[score_col], work["Relatív_pont"]).clip(0, 100).round(0)
+
+    return work.pivot_table(
+        index="Dolgozó",
+        columns="Gép",
+        values="Vizuális_pont",
+        aggfunc="mean"
+    ).round(0)
+
+
+def heatmap_symbol_from_score(value):
+    try:
+        x = float(value)
+    except Exception:
+        return "⚪"
+    if x >= 80:
+        return "🟢"
+    if x >= 65:
+        return "🟡"
+    if x >= 50:
+        return "🟠"
+    if x > 0:
+        return "🔴"
+    return "⚪"
+
+
+def make_symbol_heatmap_from_matrix(score_matrix: pd.DataFrame) -> pd.DataFrame:
+    if score_matrix is None or score_matrix.empty:
+        return pd.DataFrame()
+    return score_matrix.apply(lambda col: col.map(heatmap_symbol_from_score))
 
 
 def build_heatmap_symbols(matrix: pd.DataFrame) -> pd.DataFrame:
@@ -1044,7 +1179,7 @@ def build_pdf_report(
     fedezet_m = fedezet / 1_000_000
 
     story = []
-    story.append(Paragraph("Gyártási Diagnosztika PRO SaaS v2 SaaS.7 - vezetői riport", title_style))
+    story.append(Paragraph("Gyártási Diagnosztika PRO SaaS V2 V2 SaaS.7 - vezetői riport", title_style))
     story.append(P("Rövid döntéstámogató riport: fő megállapítások, javítási potenciál, dolgozó-gép párosítások."))
     story.append(Spacer(1, 0.20 * cm))
 
@@ -1086,7 +1221,7 @@ def build_pdf_report(
     story.extend(pdf_section_header("Dolgozó-gép hőtérkép", "Pontszám: zöld = kiemelkedő, sárga = jó, narancs = fejleszthető, piros = kerülendő."))
     if pair is not None and not pair.empty:
         try:
-            heat_matrix = pair.pivot_table(index="Dolgozó", columns="Gép", values="Kompatibilitási_pont", aggfunc="mean").round(0)
+            heat_matrix = normalized_pair_score_table(pair)
             story.append(make_pdf_real_heatmap(heat_matrix, width=520))
         except Exception:
             story.append(P("A hőtérkép nem készült el."))
@@ -2085,7 +2220,7 @@ def check_password():
     if st.session_state.password_ok:
         return True
 
-    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS v2 SaaS")
+    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS V2 V2 SaaS")
     st.caption("Tesztjelszó alapértelmezetten: demo-pro-123. Élesben Streamlit Secrets: APP_PASSWORD.")
     pw = st.text_input("Jelszó", type="password")
     if st.button("Belépés"):
@@ -2225,7 +2360,7 @@ def login_required_pro():
     if st.session_state.get("pro_user"):
         return sb, st.session_state["pro_user"]
 
-    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS v2 SaaS")
+    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS V2 V2 SaaS")
     st.caption("Előfizetőknek: belépés email + jelszóval. Fiókot az admin hoz létre az ügyfélnek.")
     email = st.text_input("Email", key="pro_login_email")
     password = st.text_input("Jelszó", type="password", key="pro_login_password")
@@ -2345,7 +2480,7 @@ st.session_state["readonly_mode"] = readonly_mode
 # ------------------------------------------------------------
 # Header
 # ------------------------------------------------------------
-st.markdown('<div class="main-title">🏭 Gyártási Diagnosztika PRO SaaS v2 SaaS</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">🏭 Gyártási Diagnosztika PRO SaaS V2 V2 SaaS</div>', unsafe_allow_html=True)
 st.markdown('<div class="subtitle">PRO SaaS verzió: emailes belépés, céges jogosultság, előfizetés-kezelés, tartós többhetes trendek és read-only mód lejárat után.</div>', unsafe_allow_html=True)
 
 
@@ -2483,7 +2618,8 @@ root_cause_recs = generate_root_cause_insights(filtered, pair, impact_df)
 # PRO.4.3.2: Digital Production Advisor mutatók
 advisor_scores = calculate_advisor_scores(default_plan_df if 'default_plan_df' in globals() and not default_plan_df.empty else filtered, default_fulfillment_df, default_capacity_df, impact_df)
 action_plan_df = build_action_plan(filtered, pair, impact_df, default_capacity_df, default_fulfillment_df)
-symbol_matrix = build_heatmap_symbols(matrix)
+pair_score_matrix = normalized_pair_score_table(pair)
+symbol_matrix = make_symbol_heatmap_from_matrix(pair_score_matrix)
 
 
 # PRO: ok-okozati lánc és rendelés/hiány pénzügyi összekötés
@@ -2910,12 +3046,13 @@ with tabs[7]:
 
     st.markdown("### Dolgozó–gép hőtérkép")
     st.caption("Pontszám: 85+ kiemelkedő, 70–85 jó, 55–70 fejleszthető, 55 alatt kerülendő.")
-    if matrix.empty:
+    if pair_score_matrix.empty:
         st.info("Nincs mátrixadat.")
     else:
-        # Streamlit Cloud / pandas Styler background_gradient matplotlibot kérne.
-        # Ezért itt stabil, függőségmentes szöveges hőtérképet mutatunk.
+        st.caption("🟢 80+ kiemelkedő · 🟡 65–79 jó · 🟠 50–64 fejleszthető · 🔴 50 alatt kerülendő")
         st.dataframe(symbol_matrix, use_container_width=True)
+        with st.expander("Pontszámok megnyitása"):
+            st.dataframe(pair_score_matrix, use_container_width=True)
 
     st.markdown("### Mi történik ha? szimulátor")
     s1, s2, s3 = st.columns(3)
@@ -2938,8 +3075,8 @@ with tabs[7]:
 # 9. PRO trendek
 # ------------------------------------------------------------
 with tabs[8]:
-    st.subheader("PRO trendek és mentett riportok")
-    st.caption("A DEMO csak egyszeri képet ad. A PRO megmutatja, javul vagy romlik-e a termelés több időszakon át.")
+    st.subheader("PRO V2 trendmotor és mentett riportok")
+    st.caption("A DEMO egyszeri képet ad. A PRO V2 több időszak alapján mutatja: javulás, romlás, trend, előző időszakhoz képesti eltérés.")
 
     current_snapshot = build_pro_kpi_snapshot(
         filtered,
@@ -2950,7 +3087,7 @@ with tabs[8]:
 
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("Aktuális elemzés mentése", use_container_width=True, disabled=readonly_mode):
+        if st.button("Aktuális időszak mentése PRO trendhez", use_container_width=True, disabled=readonly_mode):
             path = save_week_snapshot(company_name, week_label, current_snapshot, uploaded.name if uploaded else "")
             st.success("Mentve Supabase-be.")
     with c2:
@@ -2967,6 +3104,17 @@ with tabs[8]:
         for col in ["gyartott_db", "selejt_pct", "oee", "allasido_perc", "rendeles_teljesites_pct", "max_kapacitas_pct", "egeszsegpont", "javitasi_potencial_ft"]:
             if col in hist.columns:
                 hist[col] = pd.to_numeric(hist[col], errors="coerce")
+
+
+        st.markdown("### Előző időszakhoz képesti változás")
+        delta_df = build_prev_period_delta_table(hist)
+        if delta_df.empty:
+            st.info("Legalább két mentett időszak kell az összehasonlításhoz.")
+        else:
+            st.dataframe(delta_df, use_container_width=True, hide_index=True)
+
+        st.markdown("### PRO V2 automatikus trendértékelés")
+        render_recommendations(build_trend_insights(hist))
 
         st.markdown("### Trenddiagramok")
         if "oee" in hist.columns:
