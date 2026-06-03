@@ -39,7 +39,7 @@ except Exception:
 
 
 st.set_page_config(
-    page_title="Gyártási Diagnosztika PRO SaaS V3.1.1 V2 SaaS.7.5.4.4.3.3.2.2",
+    page_title="Gyártási Diagnosztika PRO SaaS V4 V4.1 V2 SaaS.7.5.4.4.3.3.2.2",
     page_icon="🏭",
     layout="wide"
 )
@@ -424,7 +424,7 @@ def build_action_plan(df: pd.DataFrame, pair: pd.DataFrame, impact_df: pd.DataFr
 
 
 def build_trend_insights(history_df: pd.DataFrame) -> List[Tuple[str, str]]:
-    """PRO V3.1: vezetői trendmegállapítások több időszak alapján."""
+    """PRO V4: vezetői trendmegállapítások több időszak alapján."""
     if history_df is None or history_df.empty or len(history_df) < 2:
         return [("info", "Ments el legalább két időszakot, hogy trendmegállapítás készüljön.")]
 
@@ -1179,7 +1179,7 @@ def build_pdf_report(
     fedezet_m = fedezet / 1_000_000
 
     story = []
-    story.append(Paragraph("Gyártási Diagnosztika PRO SaaS V3.1.1 V2 SaaS.7 - vezetői riport", title_style))
+    story.append(Paragraph("Gyártási Diagnosztika PRO SaaS V4 V4.1 V2 SaaS.7 - vezetői riport", title_style))
     story.append(P("Rövid döntéstámogató riport: fő megállapítások, javítási potenciál, dolgozó-gép párosítások."))
     story.append(Spacer(1, 0.20 * cm))
 
@@ -2220,7 +2220,7 @@ def check_password():
     if st.session_state.password_ok:
         return True
 
-    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS V3.1.1 V2 SaaS")
+    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS V4 V4.1 V2 SaaS")
     st.caption("Tesztjelszó alapértelmezetten: demo-pro-123. Élesben Streamlit Secrets: APP_PASSWORD.")
     pw = st.text_input("Jelszó", type="password")
     if st.button("Belépés"):
@@ -2235,40 +2235,56 @@ if not check_password():
     st.stop()
 
 def get_supabase_client():
-    """Supabase kliens Streamlit Secrets alapján.
-
-    Streamlit Cloud secrets példa:
-    APP_PASSWORD = "sajat-jelszo"
-    SUPABASE_URL = "https://xxxx.supabase.co"
-    SUPABASE_ANON_KEY = "ey..."
-    """
+    """Auth kliens: belépéshez anon/publishable kulcsot használ."""
     if create_client is None:
         return None
-
     try:
         url = st.secrets.get("SUPABASE_URL", None)
-        key = st.secrets.get("SUPABASE_ANON_KEY", None)
+        key = st.secrets.get("SUPABASE_ANON_KEY", None) or st.secrets.get("SUPABASE_PUBLISHABLE_KEY", None)
     except Exception:
         url = None
         key = None
 
-    if not url:
-        url = os.environ.get("SUPABASE_URL")
-    if not key:
-        key = os.environ.get("SUPABASE_ANON_KEY")
-
+    url = url or os.environ.get("SUPABASE_URL")
+    key = key or os.environ.get("SUPABASE_ANON_KEY") or os.environ.get("SUPABASE_PUBLISHABLE_KEY")
     if not url or not key:
         return None
 
+    url = str(url).replace("/rest/v1/", "").rstrip("/")
     return create_client(url, key)
 
 
+def get_supabase_data_client():
+    """Adatbázis kliens szerveroldali műveletekhez.
+
+    Ha van SUPABASE_SERVICE_ROLE_KEY a Streamlit Secrets-ben, azt használja.
+    Ez stabilabb SaaS oldali lekérdezéshez/mentéshez, mert nem akad el RLS/policy miatt.
+    """
+    if create_client is None:
+        return None
+    try:
+        url = st.secrets.get("SUPABASE_URL", None)
+        service_key = st.secrets.get("SUPABASE_SERVICE_ROLE_KEY", None)
+        anon_key = st.secrets.get("SUPABASE_ANON_KEY", None) or st.secrets.get("SUPABASE_PUBLISHABLE_KEY", None)
+    except Exception:
+        url = None
+        service_key = None
+        anon_key = None
+
+    url = url or os.environ.get("SUPABASE_URL")
+    key = service_key or os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or anon_key or os.environ.get("SUPABASE_ANON_KEY") or os.environ.get("SUPABASE_PUBLISHABLE_KEY")
+    if not url or not key:
+        return None
+
+    url = str(url).replace("/rest/v1/", "").rstrip("/")
+    return create_client(url, key)
+
 def save_week_snapshot(company, week_label, kpis, uploaded_name=""):
-    """PRO V3.1: biztonságosabb Supabase mentés + részletes hibaüzenet."""
+    """PRO V4: Supabase mentés service role data clienttel, ha elérhető."""
     if st.session_state.get("readonly_mode"):
         raise RuntimeError("Az előfizetés lejárt vagy inaktív. Új mentés nem engedélyezett.")
 
-    client = get_supabase_client()
+    client = get_supabase_data_client()
     if client is None:
         raise RuntimeError("Supabase nincs beállítva.")
 
@@ -2309,26 +2325,33 @@ def save_week_snapshot(company, week_label, kpis, uploaded_name=""):
     except Exception as exc:
         st.error("Supabase mentési hiba.")
         st.code(str(exc))
-        st.info("Futtasd le a supabase_fix_pro_v3.sql fájlt a Supabase SQL Editorban, majd próbáld újra.")
+        st.info("Ellenőrizd: production_snapshots tábla, company_id+week unique index, valamint SUPABASE_SERVICE_ROLE_KEY a Secrets-ben.")
         raise
 
-def load_company_history(company):
-    """Korábbi hetek betöltése Supabase-ből."""
-    client = get_supabase_client()
+def load_company_history(company=None):
+    """Korábbi hetek betöltése Supabase-ből a belépett user cégére szűrve."""
+    client = get_supabase_data_client()
     if client is None:
         return pd.DataFrame()
 
-    result = (
-        client
-        .table("production_snapshots")
-        .select("*")
-        .eq("company", company)
-        .order("week")
-        .execute()
-    )
-    data = getattr(result, "data", None) or []
-    return pd.DataFrame(data)
+    ctx = st.session_state.get("company_context", {})
+    company_id = ctx.get("company_id")
+    if not company_id:
+        return pd.DataFrame()
 
+    try:
+        res = (
+            client
+            .table("production_snapshots")
+            .select("*")
+            .eq("company_id", company_id)
+            .order("week")
+            .execute()
+        )
+        return pd.DataFrame(res.data or [])
+    except Exception as exc:
+        st.warning(f"Előzmények betöltése sikertelen: {exc}")
+        return pd.DataFrame()
 
 def build_pro_kpi_snapshot(filtered, default_fulfillment_df=None, default_capacity_df=None, advisor_scores=None):
     total_qty = float(filtered["Gyártott_db"].sum()) if filtered is not None and not filtered.empty else 0
@@ -2383,7 +2406,7 @@ def login_required_pro():
     if st.session_state.get("pro_user"):
         return sb, st.session_state["pro_user"]
 
-    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS V3.1.1 V2 SaaS")
+    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS V4 V4.1 V2 SaaS")
     st.caption("Előfizetőknek: belépés email + jelszóval. Fiókot az admin hoz létre az ügyfélnek.")
     email = st.text_input("Email", key="pro_login_email")
     password = st.text_input("Jelszó", type="password", key="pro_login_password")
@@ -2405,14 +2428,16 @@ def login_required_pro():
 def load_company_context(sb, user_id: str):
     """Céges jogosultság betöltése stabil, kétlépcsős módon.
 
-    V3.1:
-    - először company_users táblát kérdezi le sima select("*") hívással
+    V4:
+    - company_users táblát service role data clienttel kérdezi, ha elérhető
     - utána külön tölti be a companies sort
-    - hiba esetén kiírja a belépett user_id-t és egy ellenőrző SQL-t
+    - ha nincs sor, kiírja az ellenőrző SQL-t
     """
+    data_sb = get_supabase_data_client() or sb
+
     try:
         membership_res = (
-            sb.table("company_users")
+            data_sb.table("company_users")
             .select("*")
             .eq("user_id", str(user_id))
             .execute()
@@ -2426,12 +2451,13 @@ def load_company_context(sb, user_id: str):
     if not rows:
         st.error("Ehhez a felhasználóhoz nincs cég jogosultság rendelve.")
         st.code(f"Belépett user_id: {user_id}")
-        st.info("Ellenőrizd, hogy pontosan ez az ID szerepel-e a company_users.user_id mezőben ugyanebben a Supabase projektben.")
-        st.code(
-            f"""select * 
-from company_users 
-where user_id = '{user_id}';"""
+        st.info(
+            "Ha a Supabase-ben látod ezt a user_id-t a company_users táblában, "
+            "akkor add meg a SUPABASE_SERVICE_ROLE_KEY értéket is a Streamlit Secrets-ben."
         )
+        st.code(f"""select * 
+from company_users 
+where user_id = '{user_id}';""")
         st.stop()
 
     row = rows[0]
@@ -2439,7 +2465,7 @@ where user_id = '{user_id}';"""
 
     try:
         company_res = (
-            sb.table("companies")
+            data_sb.table("companies")
             .select("*")
             .eq("id", company_id)
             .single()
@@ -2511,7 +2537,7 @@ st.session_state["readonly_mode"] = readonly_mode
 # ------------------------------------------------------------
 # Header
 # ------------------------------------------------------------
-st.markdown('<div class="main-title">🏭 Gyártási Diagnosztika PRO SaaS V3.1.1 V2 SaaS</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">🏭 Gyártási Diagnosztika PRO SaaS V4 V4.1 V2 SaaS</div>', unsafe_allow_html=True)
 st.markdown('<div class="subtitle">PRO SaaS verzió: emailes belépés, céges jogosultság, előfizetés-kezelés, tartós többhetes trendek és read-only mód lejárat után.</div>', unsafe_allow_html=True)
 
 
@@ -2568,6 +2594,11 @@ with st.sidebar:
     with st.expander("Technikai ellenőrzés"):
         st.code(f"user_id = {pro_user.get('id','')}")
         st.code(f"company_id = {company_context.get('company_id','')}")
+        try:
+            service_present = bool(st.secrets.get("SUPABASE_SERVICE_ROLE_KEY", None))
+        except Exception:
+            service_present = bool(os.environ.get("SUPABASE_SERVICE_ROLE_KEY"))
+        st.code(f"Service role key: {'BEÁLLÍTVA' if service_present else 'NINCS BEÁLLÍTVA'}")
 
     if readonly_mode:
         st.error(subscription_message)
@@ -3111,8 +3142,8 @@ with tabs[7]:
 # 9. PRO trendek
 # ------------------------------------------------------------
 with tabs[8]:
-    st.subheader("PRO V3.1 trendmotor és mentett riportok")
-    st.caption("A DEMO egyszeri képet ad. A PRO V3.1 több időszak alapján mutatja: javulás, romlás, trend, előző időszakhoz képesti eltérés.")
+    st.subheader("PRO V4 trendmotor és mentett riportok")
+    st.caption("A DEMO egyszeri képet ad. A PRO V4 több időszak alapján mutatja: javulás, romlás, trend, előző időszakhoz képesti eltérés.")
 
     current_snapshot = build_pro_kpi_snapshot(
         filtered,
@@ -3149,7 +3180,7 @@ with tabs[8]:
         else:
             st.dataframe(delta_df, use_container_width=True, hide_index=True)
 
-        st.markdown("### PRO V3.1 automatikus trendértékelés")
+        st.markdown("### PRO V4 automatikus trendértékelés")
         render_recommendations(build_trend_insights(hist))
 
         st.markdown("### Trenddiagramok")
