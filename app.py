@@ -49,7 +49,7 @@ except NameError:
         PageBreak = None
 
 st.set_page_config(
-    page_title="Gyártási Diagnosztika PRO SaaS V9.1 V4.1 V2 SaaS.7.5.4.4.3.3.2.2",
+    page_title="Gyártási Diagnosztika PRO SaaS V11 V4.1 V2 SaaS.7.5.4.4.3.3.2.2",
     page_icon="🏭",
     layout="wide"
 )
@@ -683,7 +683,7 @@ def build_recommender_quality_notes(base_assignment: pd.DataFrame, opt_assignmen
 
 
 def build_trend_insights(history_df: pd.DataFrame) -> List[Tuple[str, str]]:
-    """PRO V9.1: vezetői trendmegállapítások több időszak alapján."""
+    """PRO V11: vezetői trendmegállapítások több időszak alapján."""
     if history_df is None or history_df.empty or len(history_df) < 2:
         return [("info", "Ments el legalább két időszakot, hogy trendmegállapítás készüljön.")]
 
@@ -1585,6 +1585,230 @@ def _pdf_pro_action_cards(action_plan_df, max_items=8):
     return elems
 
 
+
+def clean_zero_heavy_plan_for_report(plan_df: pd.DataFrame) -> pd.DataFrame:
+    """Gyártási terv riportbarát tisztítása.
+
+    A cél: ne tele legyen 0-val. A 0 nem mindig információ, sokszor csak azt jelenti,
+    hogy adott rendelésre nincs tervsor vagy a becslés nem készült el.
+    """
+    if plan_df is None or plan_df.empty:
+        return pd.DataFrame()
+
+    out = plan_df.copy()
+    numeric_cols = ["Igényelt_db", "Tervezett_db", "Hiány_db", "Becsült_óra", "Teljesítés_%", "Kihasználtság_%"]
+    for c in numeric_cols:
+        if c in out.columns:
+            out[c] = pd.to_numeric(out[c], errors="coerce")
+
+    # Ha Tervezett_db 0, de van Igényelt_db, ne tűnjön bénának: külön státuszt kap.
+    if "Tervezett_db" in out.columns and "Igényelt_db" in out.columns:
+        out["Terv_státusz"] = np.select(
+            [
+                out["Tervezett_db"].fillna(0).eq(0) & out["Igényelt_db"].fillna(0).gt(0),
+                out["Tervezett_db"].fillna(0).ge(out["Igényelt_db"].fillna(0)),
+                out["Tervezett_db"].fillna(0).gt(0) & out["Tervezett_db"].fillna(0).lt(out["Igényelt_db"].fillna(0)),
+            ],
+            [
+                "Nincs még tervsor / kapacitásvizsgálat szükséges",
+                "Teljesíthető",
+                "Részben teljesíthető",
+            ],
+            default="Nincs adat"
+        )
+
+    # Hiány újraszámolása, ha lehet
+    if "Igényelt_db" in out.columns and "Tervezett_db" in out.columns:
+        out["Hiány_db"] = (out["Igényelt_db"].fillna(0) - out["Tervezett_db"].fillna(0)).clip(lower=0)
+
+    # 0-k helyett üres jelölés ott, ahol a 0 nem hasznos vizuálisan
+    display_cols = out.columns.tolist()
+    for c in display_cols:
+        if c in ["Becsült_óra", "Teljesítés_%", "Kihasználtság_%"]:
+            out[c] = out[c].apply(lambda x: "" if pd.isna(x) or float(x) == 0 else round(float(x), 1))
+        elif c in ["Tervezett_db"]:
+            # ha 0, szöveges státusz fogja magyarázni
+            out[c] = out[c].apply(lambda x: "nincs terv" if pd.isna(x) or float(x) == 0 else int(float(x)))
+        elif c in ["Hiány_db", "Igényelt_db"]:
+            out[c] = out[c].apply(lambda x: "" if pd.isna(x) else int(float(x)))
+
+    return out
+
+
+def build_plan_summary_for_pdf(plan_df: pd.DataFrame, fulfillment_df: pd.DataFrame = None, capacity_df: pd.DataFrame = None) -> List[Tuple[str, str]]:
+    """Vezetői magyarázat a tervhez, hogy ne csak nyers 0-k legyenek."""
+    notes = []
+    if plan_df is None or plan_df.empty:
+        return [("warning", "Nincs gyártási terv adat. A PRO-ban rendelésállományból és kapacitásból készül a tervjavaslat.")]
+
+    p = plan_df.copy()
+    for c in ["Igényelt_db", "Tervezett_db", "Hiány_db"]:
+        if c in p.columns:
+            p[c] = pd.to_numeric(p[c], errors="coerce").fillna(0)
+
+    if "Tervezett_db" in p.columns and "Igényelt_db" in p.columns:
+        no_plan = int((p["Tervezett_db"].eq(0) & p["Igényelt_db"].gt(0)).sum())
+        partial = int((p["Tervezett_db"].gt(0) & p["Tervezett_db"].lt(p["Igényelt_db"])).sum())
+        ok = int((p["Tervezett_db"].ge(p["Igényelt_db"]) & p["Igényelt_db"].gt(0)).sum())
+        notes.append(("info", f"Tervstátusz: {ok} rendelés teljesíthető, {partial} részben teljesíthető, {no_plan} rendeléshez nincs még tervsor."))
+        if no_plan > 0:
+            notes.append(("warning", "A 0 db nem gyártási eredmény, hanem hiányzó / még nem kiosztott tervsort jelez. Ezeket kapacitásvizsgálatra kell tenni."))
+
+    if fulfillment_df is not None and not fulfillment_df.empty and "Hiány_db" in fulfillment_df.columns:
+        f = fulfillment_df.copy()
+        f["Hiány_db"] = pd.to_numeric(f["Hiány_db"], errors="coerce").fillna(0)
+        top = f.sort_values("Hiány_db", ascending=False).head(1)
+        if not top.empty and top.iloc[0]["Hiány_db"] > 0:
+            notes.append(("danger", f"Legnagyobb rendelési kockázat: {top.iloc[0].get('Termék','termék')} – {int(top.iloc[0]['Hiány_db'])} db hiány."))
+
+    if capacity_df is not None and not capacity_df.empty and "Kihasználtság_%" in capacity_df.columns:
+        c = capacity_df.copy()
+        c["Kihasználtság_%"] = pd.to_numeric(c["Kihasználtság_%"], errors="coerce").fillna(0)
+        bottleneck = c.sort_values("Kihasználtság_%", ascending=False).head(1)
+        if not bottleneck.empty:
+            notes.append(("info", f"Kapacitás fókusz: {bottleneck.iloc[0].get('Gép','gép')} kihasználtsága {bottleneck.iloc[0]['Kihasználtság_%']:.1f}%."))
+
+    return notes[:5]
+
+
+def build_pdf_trend_table(history_df: pd.DataFrame) -> pd.DataFrame:
+    """Mentett Supabase idősor PDF-be: rövid, vezetői trendtábla."""
+    if history_df is None or history_df.empty:
+        return pd.DataFrame()
+    h = history_df.copy().sort_values("week")
+    keep = ["week", "oee", "selejt_pct", "allasido_perc", "rendeles_teljesites_pct", "javitasi_potencial_ft"]
+    keep = [c for c in keep if c in h.columns]
+    h = h[keep].tail(8).copy()
+    rename = {
+        "week": "Időszak",
+        "oee": "OEE %",
+        "selejt_pct": "Selejt %",
+        "allasido_perc": "Állásidő perc",
+        "rendeles_teljesites_pct": "Teljesítés %",
+        "javitasi_potencial_ft": "Potenciál Ft",
+    }
+    h = h.rename(columns=rename)
+    for c in h.columns:
+        if c != "Időszak":
+            h[c] = pd.to_numeric(h[c], errors="coerce").round(1)
+    return h
+
+
+def build_pdf_trend_insights(history_df: pd.DataFrame) -> List[Tuple[str, str]]:
+    if history_df is None or history_df.empty or len(history_df) < 2:
+        return [("info", "Még nincs elég mentett időszak trendhez. Ments legalább két hetet a PRO trendekhez.")]
+    h = history_df.sort_values("week").copy()
+    notes = []
+    for col, label, good_down in [
+        ("oee", "OEE", False),
+        ("selejt_pct", "Selejt", True),
+        ("allasido_perc", "Állásidő", True),
+        ("javitasi_potencial_ft", "Javítási potenciál", True),
+    ]:
+        if col in h.columns:
+            vals = pd.to_numeric(h[col], errors="coerce").dropna()
+            if len(vals) >= 2:
+                diff = vals.iloc[-1] - vals.iloc[-2]
+                ok = diff <= 0 if good_down else diff >= 0
+                notes.append(("success" if ok else "warning", f"{label} változás az előző mentett időszakhoz képest: {diff:+.1f}."))
+    return notes[:5]
+
+
+
+def _pdf_trend_sparkline_table(history_df: pd.DataFrame):
+    """PDF-kompatibilis mini trendblokk: utolsó 3-8 időszak KPI-kártyák + trend irány."""
+    elems = []
+    if history_df is None or history_df.empty or len(history_df) < 2:
+        elems.append(Paragraph("Még nincs elég mentett hét a trenddiagramhoz. Ments legalább 2-3 időszakot.", ParagraphStyle("TrendEmpty", fontSize=8)))
+        return elems
+
+    h = history_df.sort_values("week").copy().tail(8)
+    metrics = [
+        ("OEE", "oee", "pont", False),
+        ("Selejt", "selejt_pct", "százalékpont", True),
+        ("Állásidő", "allasido_perc", "perc", True),
+        ("Potenciál", "javitasi_potencial_ft", "Ft", True),
+    ]
+    rows = [["Mutató", "Első", "Előző", "Aktuális", "Változás", "Irány"]]
+    for label, col, unit, good_down in metrics:
+        if col not in h.columns:
+            continue
+        vals = pd.to_numeric(h[col], errors="coerce").dropna()
+        if len(vals) < 2:
+            continue
+        first, prev, last = vals.iloc[0], vals.iloc[-2], vals.iloc[-1]
+        diff = last - prev
+        is_good = diff <= 0 if good_down else diff >= 0
+        arrow = "✅ javul" if is_good else "⚠ romlik"
+        rows.append([label, round(first,1), round(prev,1), round(last,1), f"{diff:+.1f} {unit}", arrow])
+
+    style_header = ParagraphStyle("TrendHead", fontSize=7.2, textColor=colors.white, leading=8.5)
+    style_cell = ParagraphStyle("TrendCell", fontSize=7.2, textColor=colors.HexColor("#0f172a"), leading=8.5)
+    table = Table([[Paragraph(pdf_safe_text(str(v)), style_header if i == 0 else style_cell) for v in row] for i, row in enumerate(rows)], repeatRows=1)
+    ts = [
+        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#1e3a8a")),
+        ("TEXTCOLOR", (0,0), (-1,0), colors.white),
+        ("GRID", (0,0), (-1,-1), 0.25, colors.HexColor("#cbd5e1")),
+        ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+        ("VALIGN", (0,0), (-1,-1), "TOP"),
+        ("TOPPADDING", (0,0), (-1,-1), 5),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 5),
+    ]
+    for i in range(1, len(rows)):
+        direction = rows[i][-1]
+        bg = "#dcfce7" if "javul" in direction else "#fee2e2"
+        ts.append(("BACKGROUND", (0,i), (-1,i), colors.HexColor(bg)))
+    table.setStyle(TableStyle(ts))
+    elems.append(table)
+    return elems
+
+
+def _pdf_executive_cover_box(title, subtitle):
+    txt = f"<b>{pdf_safe_text(title)}</b><br/>{pdf_safe_text(subtitle)}"
+    box = Table([[Paragraph(txt, ParagraphStyle("CoverBox", fontSize=10, leading=13, textColor=colors.HexColor("#0f172a")))]], colWidths=[16.8*cm])
+    box.setStyle(TableStyle([
+        ("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#eff6ff")),
+        ("BOX", (0,0), (-1,-1), 1.0, colors.HexColor("#1e3a8a")),
+        ("LEFTPADDING", (0,0), (-1,-1), 10),
+        ("RIGHTPADDING", (0,0), (-1,-1), 10),
+        ("TOPPADDING", (0,0), (-1,-1), 10),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 10),
+    ]))
+    return box
+
+
+def _pdf_priority_matrix(impact_df=None, fulfillment_df=None, capacity_df=None):
+    rows = [["Prioritás", "Fókusz", "Miért fontos?", "Első lépés"]]
+    if impact_df is not None and not impact_df.empty:
+        for _, r in impact_df.head(3).iterrows():
+            rows.append(["🔴 Magas", str(r.get("Elem","")), str(r.get("Probléma","")), "Helyszíni ellenőrzés + akció kijelölése"])
+    if fulfillment_df is not None and not fulfillment_df.empty and "Hiány_db" in fulfillment_df.columns:
+        f = fulfillment_df.copy()
+        f["Hiány_db"] = pd.to_numeric(f["Hiány_db"], errors="coerce").fillna(0)
+        top = f.sort_values("Hiány_db", ascending=False).head(2)
+        for _, r in top.iterrows():
+            if r.get("Hiány_db",0) > 0:
+                rows.append(["🟠 Közepes", str(r.get("Termék","")), f"{int(r.get('Hiány_db',0))} db hiány", "Kapacitás átcsoportosítás"])
+    if len(rows) == 1:
+        rows.append(["🟢 Normál", "Nincs kritikus elem", "Nincs kiugró kockázat", "Monitoring"])
+    head = ParagraphStyle("PrioHead", fontSize=7, textColor=colors.white, leading=8.3)
+    cell = ParagraphStyle("PrioCell", fontSize=7, textColor=colors.HexColor("#0f172a"), leading=8.3)
+    t = Table([[Paragraph(pdf_safe_text(str(v)), head if i==0 else cell) for v in row] for i,row in enumerate(rows)], repeatRows=1, colWidths=[2.4*cm,3.2*cm,6.2*cm,5.0*cm])
+    style = [
+        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#0f172a")),
+        ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+        ("GRID", (0,0), (-1,-1), 0.25, colors.HexColor("#cbd5e1")),
+        ("VALIGN", (0,0), (-1,-1), "TOP"),
+        ("TOPPADDING", (0,0), (-1,-1), 5),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 5),
+    ]
+    for i in range(1,len(rows)):
+        bg = "#fee2e2" if "🔴" in rows[i][0] else "#ffedd5" if "🟠" in rows[i][0] else "#dcfce7"
+        style.append(("BACKGROUND", (0,i), (-1,i), colors.HexColor(bg)))
+    t.setStyle(TableStyle(style))
+    return t
+
+
 def build_pdf_report(
     df: pd.DataFrame,
     pair: pd.DataFrame,
@@ -1605,7 +1829,7 @@ def build_pdf_report(
     lost_revenue_df: pd.DataFrame = None,
     critical_orders_df: pd.DataFrame = None
 ) -> bytes:
-    """PRO V9.1: sokoldalas, tanácsadói jellegű vezetői PDF."""
+    """PRO V11: sokoldalas, tanácsadói jellegű vezetői PDF."""
     if SimpleDocTemplate is None:
         return None
 
@@ -1626,11 +1850,30 @@ def build_pdf_report(
     story.append(Paragraph("Gyártási Diagnosztika PRO - teljes vezetői riport", title_style))
     story.append(P("Tanácsadói jellegű export: KPI-k, veszteségforrások, dolgozó-gép ajánlórendszer, what-if, kapacitás, rendeléskockázat és akcióterv.", subtitle_style))
     story.append(Spacer(1, 0.2*cm))
+    story.append(_pdf_executive_cover_box("PRO V11: prémium vezetői riport", "Ezt a riportot érdemes elküldeni mintaként: nem csak dashboard, hanem konkrét döntési és pénzügyi akciólista."))
+    story.append(Spacer(1, 0.2*cm))
     story.append(_pdf_pro_kpi_grid(df, fulfillment_df, capacity_df, impact_df))
     story.append(Spacer(1, 0.2*cm))
     story.extend(pdf_section_header("Vezetői lényeg"))
     story.append(compact_insight_table((recs or [])[:6], max_items=6))
     story.extend(_pdf_pro_action_cards(action_plan_df, max_items=3))
+    story.append(Spacer(1, 0.2*cm))
+    story.extend(pdf_section_header("Prioritási mátrix"))
+    story.append(_pdf_priority_matrix(impact_df, fulfillment_df, capacity_df))
+
+
+    # PRO V11: többhetes trendek a PDF-ben
+    try:
+        history_pdf_df = load_company_history(company_context.get("company_name", None)) if "company_context" in globals() else pd.DataFrame()
+    except Exception:
+        history_pdf_df = pd.DataFrame()
+
+    story.append(PageBreak())
+    story.extend(pdf_section_header("0. Többhetes trendek", "A PRO egyik fő értéke: nem csak egyszeri diagnózis, hanem mentett időszakok összehasonlítása."))
+    story.append(compact_insight_table(build_pdf_trend_insights(history_pdf_df), max_items=5))
+    story.extend(_pdf_trend_sparkline_table(history_pdf_df))
+    trend_table_pdf = build_pdf_trend_table(history_pdf_df)
+    story.extend(_pdf_pro_table(trend_table_pdf, "Mentett időszakok trendtáblája", None, limit=8))
 
     story.append(PageBreak())
     story.extend(pdf_section_header("1. Gyökérok és pénzügyi fókusz"))
@@ -1683,7 +1926,9 @@ def build_pdf_report(
 
     story.append(PageBreak())
     story.extend(pdf_section_header("6. Gyártási terv és dolgozói beosztás"))
-    story.extend(_pdf_pro_table(plan_df, "Gyártási terv", ["Rendelés_ID", "Termék", "Gép", "Igényelt_db", "Tervezett_db", "Hiány_db", "Becsült_óra"], limit=18))
+    clean_plan_pdf = clean_zero_heavy_plan_for_report(plan_df)
+    story.append(compact_insight_table(build_plan_summary_for_pdf(plan_df, fulfillment_df, capacity_df), max_items=5))
+    story.extend(_pdf_pro_table(clean_plan_pdf, "Gyártási terv - vezetői nézet", ["Rendelés_ID", "Termék", "Gép", "Igényelt_db", "Tervezett_db", "Hiány_db", "Terv_státusz", "Becsült_óra"], limit=18))
     story.extend(_pdf_pro_table(worker_plan, "Dolgozói beosztási javaslat", ["Rendelés_ID", "Gép", "Termék", "Tervezett_db", "Ajánlott_dolgozó", "Dolgozó-gép_pont"], limit=18))
 
     story.append(PageBreak())
@@ -2690,7 +2935,7 @@ def check_password():
     if st.session_state.password_ok:
         return True
 
-    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS V9.1 V4.1 V2 SaaS")
+    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS V11 V4.1 V2 SaaS")
     st.caption("Tesztjelszó alapértelmezetten: demo-pro-123. Élesben Streamlit Secrets: APP_PASSWORD.")
     pw = st.text_input("Jelszó", type="password")
     if st.button("Belépés"):
@@ -2834,7 +3079,7 @@ def bytes_to_temp_xlsx(raw_bytes: bytes):
 
 
 def save_week_snapshot(company, week_label, kpis, uploaded_name=""):
-    """PRO V9.1: Supabase mentés service role data clienttel, ha elérhető."""
+    """PRO V11: Supabase mentés service role data clienttel, ha elérhető."""
     if st.session_state.get("readonly_mode"):
         raise RuntimeError("Az előfizetés lejárt vagy inaktív. Új mentés nem engedélyezett.")
 
@@ -2960,7 +3205,7 @@ def login_required_pro():
     if st.session_state.get("pro_user"):
         return sb, st.session_state["pro_user"]
 
-    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS V9.1 V4.1 V2 SaaS")
+    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS V11 V4.1 V2 SaaS")
     st.caption("Előfizetőknek: belépés email + jelszóval. Fiókot az admin hoz létre az ügyfélnek.")
     email = st.text_input("Email", key="pro_login_email")
     password = st.text_input("Jelszó", type="password", key="pro_login_password")
@@ -3091,7 +3336,7 @@ st.session_state["readonly_mode"] = readonly_mode
 # ------------------------------------------------------------
 # Header
 # ------------------------------------------------------------
-st.markdown('<div class="main-title">🏭 Gyártási Diagnosztika PRO SaaS V9.1 V4.1 V2 SaaS</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">🏭 Gyártási Diagnosztika PRO SaaS V11 V4.1 V2 SaaS</div>', unsafe_allow_html=True)
 st.markdown('<div class="subtitle">PRO SaaS verzió: emailes belépés, céges jogosultság, előfizetés-kezelés, tartós többhetes trendek és read-only mód lejárat után.</div>', unsafe_allow_html=True)
 
 
@@ -3744,8 +3989,8 @@ with tabs[7]:
 # 9. PRO trendek
 # ------------------------------------------------------------
 with tabs[8]:
-    st.subheader("PRO V9.1 trendmotor és mentett riportok")
-    st.caption("A DEMO egyszeri képet ad. A PRO V9.1 több időszak alapján mutatja: javulás, romlás, trend, előző időszakhoz képesti eltérés.")
+    st.subheader("PRO V11 trendmotor és mentett riportok")
+    st.caption("A DEMO egyszeri képet ad. A PRO V11 több időszak alapján mutatja: javulás, romlás, trend, előző időszakhoz képesti eltérés.")
 
     current_snapshot = build_pro_kpi_snapshot(
         filtered,
@@ -3782,7 +4027,7 @@ with tabs[8]:
         else:
             st.dataframe(delta_df, use_container_width=True, hide_index=True)
 
-        st.markdown("### PRO V9.1 automatikus trendértékelés")
+        st.markdown("### PRO V11 automatikus trendértékelés")
         render_recommendations(build_trend_insights(hist))
 
         st.markdown("### Trenddiagramok")
