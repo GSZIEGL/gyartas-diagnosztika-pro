@@ -49,7 +49,7 @@ except NameError:
         PageBreak = None
 
 st.set_page_config(
-    page_title="Gyártási Diagnosztika PRO SaaS V11 V4.1 V2 SaaS.7.5.4.4.3.3.2.2",
+    page_title="Gyártási Diagnosztika PRO SaaS V12 V4.1 V2 SaaS.7.5.4.4.3.3.2.2",
     page_icon="🏭",
     layout="wide"
 )
@@ -539,33 +539,54 @@ def render_ai_plan_summary(delta_df: pd.DataFrame):
 
 
 def build_specific_30_day_actions(impact_df=None, capacity_df=None, fulfillment_df=None, pair=None, delta_df=None) -> pd.DataFrame:
+    """Konkrét, gép/termék/dolgozó szintű 30 napos akcióterv."""
     rows = []
     if impact_df is not None and not impact_df.empty:
-        for _, r in impact_df.head(3).iterrows():
-            elem = str(r.get("Elem", ""))
+        imp = impact_df.copy()
+        if "Becsült_havi_hatás_Ft" in imp.columns:
+            imp["hatás_num"] = pd.to_numeric(imp["Becsült_havi_hatás_Ft"], errors="coerce").fillna(0)
+            imp = imp.sort_values("hatás_num", ascending=False)
+        for _, r in imp.head(4).iterrows():
+            elem = str(r.get("Elem", "")).strip()
+            if not elem:
+                continue
+            problem = str(r.get("Probléma", "")).strip()
+            hatas = r.get("Becsült_havi_hatás_Ft", r.get("hatás_num", 0))
+            if " + " in elem:
+                action = f"{elem}: 1 műszakos kontrollteszt, első darab ellenörzés és célzott betanítás."
+                owner = "Műszakvezető / minőségellenőr"
+            elif elem.upper().startswith("MX"):
+                action = f"{elem}: állásidő okkódok ellenörzése, beállítási idö mérése, legjobb dolgozó-párosítás kipróbálása."
+                owner = "Termelésvezető / karbantartás"
+            elif elem.upper().startswith("SKU"):
+                action = f"{elem}: termékáthelyezési próba, alternatív gép és prioritási sorrend felülvizsgálata."
+                owner = "Termeléstervező"
+            else:
+                action = f"{elem}: célzott helyszíni okkeresés és egyhetes kontrollmérés."
+                owner = "Termelésvezető"
             rows.append({
-                "Prioritás": "Magas",
+                "Prioritás": "Magas" if len(rows) < 2 else "Közepes",
                 "Fókusz": elem,
-                "Konkrét ok": str(r.get("Probléma", "")),
-                "Teendő": f"{elem}: helyszíni ellenőrzés, beállítás/karbantartás vagy párosítás felülvizsgálata",
-                "Határidő": "7 nap",
-                "Felelős": "Termelésvezető / karbantartás",
-                "Becsült hatás": fmt_huf(r.get("Becsült_havi_hatás_Ft", 0)) if 'fmt_huf' in globals() else str(r.get("Becsült_havi_hatás_Ft", 0)),
+                "Konkrét ok": problem,
+                "Teendő": action,
+                "Határidő": "7 nap" if len(rows) < 2 else "14 nap",
+                "Felelős": owner,
+                "Becsült hatás": fmt_huf(hatas) if 'fmt_huf' in globals() else str(hatas),
             })
     if fulfillment_df is not None and not fulfillment_df.empty and "Hiány_db" in fulfillment_df.columns:
         f = fulfillment_df.copy()
         f["Hiány_db_num"] = pd.to_numeric(f["Hiány_db"], errors="coerce").fillna(0)
-        for _, r in f.sort_values("Hiány_db_num", ascending=False).head(2).iterrows():
+        for _, r in f.sort_values("Hiány_db_num", ascending=False).head(3).iterrows():
             if r.get("Hiány_db_num", 0) > 0:
                 product = r.get("Termék", "Termék")
                 rows.append({
                     "Prioritás": "Magas",
                     "Fókusz": product,
-                    "Konkrét ok": f"{int(r.get('Hiány_db_num', 0))} db hiány a tervben",
-                    "Teendő": f"{product}: kapacitás átcsoportosítás / túlóra / alternatív gép bevonása",
+                    "Konkrét ok": f"{int(r.get('Hiány_db_num', 0))} db hiány / rendelési kockázat",
+                    "Teendő": f"{product}: kapacitás átcsoportosítás, túlóra vagy alternatív gép kijelölése.",
                     "Határidő": "3 nap",
                     "Felelős": "Termeléstervező",
-                    "Becsült hatás": "Rendeléscsúszás kockázat csökkentése",
+                    "Becsült hatás": "Kiszállítási kockázat csökkentése",
                 })
     if delta_df is not None and not delta_df.empty:
         d = delta_df.copy()
@@ -577,13 +598,15 @@ def build_specific_30_day_actions(impact_df=None, capacity_df=None, fulfillment_
                 "Prioritás": "Közepes",
                 "Fókusz": f"{r.get('Gép')} / {r.get('AI javasolt dolgozó')}",
                 "Konkrét ok": f"AI párosítási pontszám +{r.get('Pontszám_hatás', 0)}",
-                "Teendő": f"{r.get('Gép')}: {r.get('Jelenlegi dolgozó')} helyett {r.get('AI javasolt dolgozó')} tesztelése 1 műszakon",
+                "Teendő": f"{r.get('Gép')}: {r.get('Jelenlegi dolgozó')} helyett {r.get('AI javasolt dolgozó')} kipróbálása 1 kontroll műszakon.",
                 "Határidő": "10 nap",
                 "Felelős": "Műszakvezető",
-                "Becsült hatás": f"{r.get('Teljesítmény_hatás_pont', 0)} pont teljesítményhatás, {r.get('Selejt_hatás_pont', 0)} pont selejt",
+                "Becsült hatás": f"{r.get('Teljesítmény_hatás_pont', 0)} pont teljesítmény, {r.get('Selejt_hatás_pont', 0)} pont selejt",
             })
-    return pd.DataFrame(rows).head(10)
-
+    out = pd.DataFrame(rows)
+    if not out.empty and "Fókusz" in out.columns:
+        out = out.drop_duplicates(subset=["Fókusz", "Teendő"]).head(10)
+    return out
 
 def build_assignment_delta(base_assignment: pd.DataFrame, opt_assignment: pd.DataFrame) -> pd.DataFrame:
     """Alap vs optimalizált beosztás eltérésének vezetői értelmezése."""
@@ -683,7 +706,7 @@ def build_recommender_quality_notes(base_assignment: pd.DataFrame, opt_assignmen
 
 
 def build_trend_insights(history_df: pd.DataFrame) -> List[Tuple[str, str]]:
-    """PRO V11: vezetői trendmegállapítások több időszak alapján."""
+    """PRO V12: vezetői trendmegállapítások több időszak alapján."""
     if history_df is None or history_df.empty or len(history_df) < 2:
         return [("info", "Ments el legalább két időszakot, hogy trendmegállapítás készüljön.")]
 
@@ -1167,14 +1190,15 @@ def make_pdf_symbol_matrix(symbol_df: pd.DataFrame, width=500):
     return t
 
 
-def pdf_safe_text(value):
-    """ReportLab alap fontokhoz biztonságos, ékezet-kímélő szöveg."""
-    return (
-        str(value or "")
-        .replace("ő", "ö").replace("Ő", "Ö")
-        .replace("ű", "ü").replace("Ű", "Ü")
-    )
-
+def pdf_safe_text(x):
+    """PDF-kompatibilis magyar szöveg: ő/ű -> ö/ü."""
+    if x is None:
+        return ""
+    txt = str(x)
+    repl = {"ő": "ö", "Ő": "Ö", "ű": "ü", "Ű": "Ü", "\u2013": "-", "\u2014": "-", "\u2026": "..."}
+    for a, b in repl.items():
+        txt = txt.replace(a, b)
+    return txt
 
 def _pdf_color_for_score(value, inverse=False):
     try:
@@ -1809,6 +1833,49 @@ def _pdf_priority_matrix(impact_df=None, fulfillment_df=None, capacity_df=None):
     return t
 
 
+
+def _pdf_anchor(name):
+    return Paragraph(f'<a name="{name}"/>', ParagraphStyle("Anchor", fontSize=1, leading=1))
+
+
+def _pdf_toc_table():
+    rows = [
+        ["Oldal", "Szakasz", "Ugrás"],
+        ["1", "Executive Summary", '<link href="#exec">Megnyitás</link>'],
+        ["2", "Többhetes trendek", '<link href="#trends">Megnyitás</link>'],
+        ["3", "Gyökérok és pénzügyi fókusz", '<link href="#root">Megnyitás</link>'],
+        ["4", "Műszak- és gépdiagnosztika", '<link href="#machine">Megnyitás</link>'],
+        ["5", "Dolgozó-gép hőtérkép", '<link href="#heatmap">Megnyitás</link>'],
+        ["6", "Ajánlórendszer és what-if", '<link href="#ai">Megnyitás</link>'],
+        ["7", "Rendelés és kapacitás", '<link href="#orders">Megnyitás</link>'],
+        ["8", "Gyártási terv", '<link href="#plan">Megnyitás</link>'],
+        ["9", "Akcióterv", '<link href="#actions">Megnyitás</link>'],
+    ]
+    head = ParagraphStyle("TocHead", fontSize=8, textColor=colors.white, leading=9.5)
+    cell = ParagraphStyle("TocCell", fontSize=8, textColor=colors.HexColor("#0f172a"), leading=9.5)
+    link_cell = ParagraphStyle("TocLink", fontSize=8, textColor=colors.HexColor("#1e3a8a"), leading=9.5)
+    data = []
+    for i, row in enumerate(rows):
+        data.append([
+            Paragraph(pdf_safe_text(row[0]), head if i == 0 else cell),
+            Paragraph(pdf_safe_text(row[1]), head if i == 0 else cell),
+            Paragraph(row[2] if i > 0 else pdf_safe_text(row[2]), head if i == 0 else link_cell),
+        ])
+    t = Table(data, colWidths=[2*cm, 10.5*cm, 4.3*cm], repeatRows=1)
+    style = [
+        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#0f172a")),
+        ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+        ("GRID", (0,0), (-1,-1), 0.25, colors.HexColor("#cbd5e1")),
+        ("VALIGN", (0,0), (-1,-1), "TOP"),
+        ("TOPPADDING", (0,0), (-1,-1), 6),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 6),
+    ]
+    for i in range(1, len(rows)):
+        style.append(("BACKGROUND", (0,i), (-1,i), colors.HexColor("#f8fafc" if i % 2 else "#eef2ff")))
+    t.setStyle(TableStyle(style))
+    return t
+
+
 def build_pdf_report(
     df: pd.DataFrame,
     pair: pd.DataFrame,
@@ -1829,7 +1896,7 @@ def build_pdf_report(
     lost_revenue_df: pd.DataFrame = None,
     critical_orders_df: pd.DataFrame = None
 ) -> bytes:
-    """PRO V11: sokoldalas, tanácsadói jellegű vezetői PDF."""
+    """PRO V12: sokoldalas, tanácsadói jellegű vezetői PDF."""
     if SimpleDocTemplate is None:
         return None
 
@@ -1850,25 +1917,25 @@ def build_pdf_report(
     story.append(Paragraph("Gyártási Diagnosztika PRO - teljes vezetői riport", title_style))
     story.append(P("Tanácsadói jellegű export: KPI-k, veszteségforrások, dolgozó-gép ajánlórendszer, what-if, kapacitás, rendeléskockázat és akcióterv.", subtitle_style))
     story.append(Spacer(1, 0.2*cm))
-    story.append(_pdf_executive_cover_box("PRO V11: prémium vezetői riport", "Ezt a riportot érdemes elküldeni mintaként: nem csak dashboard, hanem konkrét döntési és pénzügyi akciólista."))
+    story.append(_pdf_executive_cover_box("PRO V12: prémium vezetői riport", "Ezt a riportot érdemes elküldeni mintaként: nem csak dashboard, hanem konkrét döntési és pénzügyi akciólista."))
     story.append(Spacer(1, 0.2*cm))
     story.append(_pdf_pro_kpi_grid(df, fulfillment_df, capacity_df, impact_df))
     story.append(Spacer(1, 0.2*cm))
     story.extend(pdf_section_header("Vezetői lényeg"))
     story.append(compact_insight_table((recs or [])[:6], max_items=6))
-    story.extend(_pdf_pro_action_cards(action_plan_df, max_items=3))
     story.append(Spacer(1, 0.2*cm))
     story.extend(pdf_section_header("Prioritási mátrix"))
     story.append(_pdf_priority_matrix(impact_df, fulfillment_df, capacity_df))
 
 
-    # PRO V11: többhetes trendek a PDF-ben
+    # PRO V12: többhetes trendek a PDF-ben
     try:
         history_pdf_df = load_company_history(company_context.get("company_name", None)) if "company_context" in globals() else pd.DataFrame()
     except Exception:
         history_pdf_df = pd.DataFrame()
 
     story.append(PageBreak())
+    story.append(_pdf_anchor("trends"))
     story.extend(pdf_section_header("0. Többhetes trendek", "A PRO egyik fő értéke: nem csak egyszeri diagnózis, hanem mentett időszakok összehasonlítása."))
     story.append(compact_insight_table(build_pdf_trend_insights(history_pdf_df), max_items=5))
     story.extend(_pdf_trend_sparkline_table(history_pdf_df))
@@ -1876,6 +1943,7 @@ def build_pdf_report(
     story.extend(_pdf_pro_table(trend_table_pdf, "Mentett időszakok trendtáblája", None, limit=8))
 
     story.append(PageBreak())
+    story.append(_pdf_anchor("root"))
     story.extend(pdf_section_header("1. Gyökérok és pénzügyi fókusz"))
     story.append(compact_insight_table((root_cause_recs or [])[:7], max_items=7))
     if impact_df is not None and not impact_df.empty:
@@ -1883,6 +1951,7 @@ def build_pdf_report(
     story.extend(_pdf_pro_table(impact_df, "Részletes pénzügyi hatáslista", ["Terület", "Elem", "Probléma", "Becsült_havi_hatás_Ft", "Javaslat"], limit=10))
 
     story.append(PageBreak())
+    story.append(_pdf_anchor("machine"))
     story.extend(pdf_section_header("2. Műszak- és gépdiagnosztika"))
     try:
         shift_df = df.groupby("Műszak", as_index=False).agg(Gyártott_db=("Gyártott_db","sum"), Selejt_db=("Selejt_db","sum"), Állásidő_perc=("Állásidő_perc","sum"), OEE=("OEE_light_%","mean"))
@@ -1900,6 +1969,7 @@ def build_pdf_report(
     story.extend(_pdf_pro_table(machine_df.sort_values("OEE") if not machine_df.empty else machine_df, "Gépdiagnosztika", ["Gép", "Gyártott_db", "Selejt_%", "Állásidő_perc", "OEE"], limit=12))
 
     story.append(PageBreak())
+    story.append(_pdf_anchor("heatmap"))
     story.extend(pdf_section_header("3. Dolgozó-gép hőtérkép és párosítások"))
     if pair is not None and not pair.empty:
         try:
@@ -1910,6 +1980,7 @@ def build_pdf_report(
     story.extend(_pdf_pro_table(pair.sort_values("Kompatibilitási_pont", ascending=False) if pair is not None and not pair.empty else pd.DataFrame(), "Top dolgozó-gép párosok", ["Dolgozó", "Gép", "Kompatibilitási_pont", "Átlag_teljesítmény", "Selejt_%"], limit=12))
 
     story.append(PageBreak())
+    story.append(_pdf_anchor("ai"))
     story.extend(pdf_section_header("4. Ajánlórendszer és what-if optimalizáló"))
     baseline_pdf_assignment = build_current_baseline_assignment(pair)
     ai_pdf_assignment = build_ai_optimized_assignment_v2(pair)
@@ -1919,12 +1990,14 @@ def build_pdf_report(
     story.extend(_pdf_pro_table(ai_pdf_delta, "Jelenlegi vs AI terv eltérés", ["Gép", "Jelenlegi dolgozó", "AI javasolt dolgozó", "Teljesítmény_hatás_pont", "Selejt_hatás_pont", "Pontszám_hatás", "Döntés"], limit=15))
 
     story.append(PageBreak())
+    story.append(_pdf_anchor("orders"))
     story.extend(pdf_section_header("5. Rendelésállomány és kapacitáskockázat"))
     story.extend(_pdf_pro_table(fulfillment_df, "Rendelésteljesítés", ["Termék", "Rendelt_db", "Tervezett_db", "Hiány_db", "Teljesítés_%", "Státusz"], limit=15))
     story.extend(_pdf_pro_table(capacity_df, "Gépkapacitás kihasználtság", ["Gép", "Tervezett_óra", "Elérhető_óra", "Kihasználtság_%", "Státusz"], limit=15))
     story.extend(_pdf_pro_table(critical_orders_df, "Kritikus rendelések", ["Rendelés_ID", "Termék", "Rendelt_db", "Tervezett_db", "Hiány_db", "Teljesítés_%", "Státusz"], limit=12))
 
     story.append(PageBreak())
+    story.append(_pdf_anchor("plan"))
     story.extend(pdf_section_header("6. Gyártási terv és dolgozói beosztás"))
     clean_plan_pdf = clean_zero_heavy_plan_for_report(plan_df)
     story.append(compact_insight_table(build_plan_summary_for_pdf(plan_df, fulfillment_df, capacity_df), max_items=5))
@@ -1937,6 +2010,7 @@ def build_pdf_report(
     story.extend(_pdf_pro_table(lost_revenue_df, "Becsült veszteség / fedezeti hatás", None, limit=12))
 
     story.append(PageBreak())
+    story.append(_pdf_anchor("actions"))
     story.extend(pdf_section_header("8. 30 napos vezetői akcióterv"))
     specific_actions_df = build_specific_30_day_actions(impact_df, capacity_df, fulfillment_df, pair, ai_pdf_delta if "ai_pdf_delta" in locals() else None)
     story.extend(_pdf_pro_table(specific_actions_df, "Konkrét 30 napos akcióterv", ["Prioritás", "Fókusz", "Konkrét ok", "Teendő", "Határidő", "Felelős", "Becsült hatás"], limit=10))
@@ -2935,7 +3009,7 @@ def check_password():
     if st.session_state.password_ok:
         return True
 
-    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS V11 V4.1 V2 SaaS")
+    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS V12 V4.1 V2 SaaS")
     st.caption("Tesztjelszó alapértelmezetten: demo-pro-123. Élesben Streamlit Secrets: APP_PASSWORD.")
     pw = st.text_input("Jelszó", type="password")
     if st.button("Belépés"):
@@ -3049,6 +3123,19 @@ def load_saved_workbooks_from_supabase():
         return pd.DataFrame()
 
 
+def delete_saved_workbook_from_supabase(workbook_id):
+    """Mentett Excel törlése Supabase-ből."""
+    client = get_supabase_data_client()
+    if client is None or workbook_id is None:
+        return False
+    try:
+        client.table("uploaded_workbooks").delete().eq("id", int(workbook_id)).execute()
+        return True
+    except Exception as exc:
+        st.warning(f"Mentett Excel törlése sikertelen: {exc}")
+        return False
+
+
 def get_saved_workbook_bytes(workbook_id):
     """Mentett Excel bytes betöltése."""
     client = get_supabase_data_client()
@@ -3079,7 +3166,7 @@ def bytes_to_temp_xlsx(raw_bytes: bytes):
 
 
 def save_week_snapshot(company, week_label, kpis, uploaded_name=""):
-    """PRO V11: Supabase mentés service role data clienttel, ha elérhető."""
+    """PRO V12: Supabase mentés service role data clienttel, ha elérhető."""
     if st.session_state.get("readonly_mode"):
         raise RuntimeError("Az előfizetés lejárt vagy inaktív. Új mentés nem engedélyezett.")
 
@@ -3205,7 +3292,7 @@ def login_required_pro():
     if st.session_state.get("pro_user"):
         return sb, st.session_state["pro_user"]
 
-    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS V11 V4.1 V2 SaaS")
+    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS V12 V4.1 V2 SaaS")
     st.caption("Előfizetőknek: belépés email + jelszóval. Fiókot az admin hoz létre az ügyfélnek.")
     email = st.text_input("Email", key="pro_login_email")
     password = st.text_input("Jelszó", type="password", key="pro_login_password")
@@ -3336,7 +3423,7 @@ st.session_state["readonly_mode"] = readonly_mode
 # ------------------------------------------------------------
 # Header
 # ------------------------------------------------------------
-st.markdown('<div class="main-title">🏭 Gyártási Diagnosztika PRO SaaS V11 V4.1 V2 SaaS</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">🏭 Gyártási Diagnosztika PRO SaaS V12 V4.1 V2 SaaS</div>', unsafe_allow_html=True)
 st.markdown('<div class="subtitle">PRO SaaS verzió: emailes belépés, céges jogosultság, előfizetés-kezelés, tartós többhetes trendek és read-only mód lejárat után.</div>', unsafe_allow_html=True)
 
 
@@ -3989,8 +4076,8 @@ with tabs[7]:
 # 9. PRO trendek
 # ------------------------------------------------------------
 with tabs[8]:
-    st.subheader("PRO V11 trendmotor és mentett riportok")
-    st.caption("A DEMO egyszeri képet ad. A PRO V11 több időszak alapján mutatja: javulás, romlás, trend, előző időszakhoz képesti eltérés.")
+    st.subheader("PRO V12 trendmotor és mentett riportok")
+    st.caption("A DEMO egyszeri képet ad. A PRO V12 több időszak alapján mutatja: javulás, romlás, trend, előző időszakhoz képesti eltérés.")
 
     current_snapshot = build_pro_kpi_snapshot(
         filtered,
@@ -4027,7 +4114,7 @@ with tabs[8]:
         else:
             st.dataframe(delta_df, use_container_width=True, hide_index=True)
 
-        st.markdown("### PRO V11 automatikus trendértékelés")
+        st.markdown("### PRO V12 automatikus trendértékelés")
         render_recommendations(build_trend_insights(hist))
 
         st.markdown("### Trenddiagramok")
