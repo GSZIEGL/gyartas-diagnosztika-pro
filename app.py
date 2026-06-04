@@ -49,7 +49,7 @@ except NameError:
         PageBreak = None
 
 st.set_page_config(
-    page_title="Gyártási Diagnosztika PRO SaaS V9 V4.1 V2 SaaS.7.5.4.4.3.3.2.2",
+    page_title="Gyártási Diagnosztika PRO SaaS V9.1 V4.1 V2 SaaS.7.5.4.4.3.3.2.2",
     page_icon="🏭",
     layout="wide"
 )
@@ -188,7 +188,7 @@ def show_kpi(label: str, value: str, note: str = ""):
 
 
 def safe_read_excel(uploaded_file) -> Dict[str, pd.DataFrame]:
-    return pd.read_excel(active_uploaded_source_file, sheet_name=None)
+    return pd.read_excel(active_uploaded_source, sheet_name=None)
 
 
 def find_sheet(sheets: Dict[str, pd.DataFrame], possible_names: List[str]) -> pd.DataFrame:
@@ -683,7 +683,7 @@ def build_recommender_quality_notes(base_assignment: pd.DataFrame, opt_assignmen
 
 
 def build_trend_insights(history_df: pd.DataFrame) -> List[Tuple[str, str]]:
-    """PRO V9: vezetői trendmegállapítások több időszak alapján."""
+    """PRO V9.1: vezetői trendmegállapítások több időszak alapján."""
     if history_df is None or history_df.empty or len(history_df) < 2:
         return [("info", "Ments el legalább két időszakot, hogy trendmegállapítás készüljön.")]
 
@@ -1605,7 +1605,7 @@ def build_pdf_report(
     lost_revenue_df: pd.DataFrame = None,
     critical_orders_df: pd.DataFrame = None
 ) -> bytes:
-    """PRO V9: sokoldalas, tanácsadói jellegű vezetői PDF."""
+    """PRO V9.1: sokoldalas, tanácsadói jellegű vezetői PDF."""
     if SimpleDocTemplate is None:
         return None
 
@@ -2690,7 +2690,7 @@ def check_password():
     if st.session_state.password_ok:
         return True
 
-    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS V9 V4.1 V2 SaaS")
+    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS V9.1 V4.1 V2 SaaS")
     st.caption("Tesztjelszó alapértelmezetten: demo-pro-123. Élesben Streamlit Secrets: APP_PASSWORD.")
     pw = st.text_input("Jelszó", type="password")
     if st.button("Belépés"):
@@ -2834,7 +2834,7 @@ def bytes_to_temp_xlsx(raw_bytes: bytes):
 
 
 def save_week_snapshot(company, week_label, kpis, uploaded_name=""):
-    """PRO V9: Supabase mentés service role data clienttel, ha elérhető."""
+    """PRO V9.1: Supabase mentés service role data clienttel, ha elérhető."""
     if st.session_state.get("readonly_mode"):
         raise RuntimeError("Az előfizetés lejárt vagy inaktív. Új mentés nem engedélyezett.")
 
@@ -2960,7 +2960,7 @@ def login_required_pro():
     if st.session_state.get("pro_user"):
         return sb, st.session_state["pro_user"]
 
-    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS V9 V4.1 V2 SaaS")
+    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS V9.1 V4.1 V2 SaaS")
     st.caption("Előfizetőknek: belépés email + jelszóval. Fiókot az admin hoz létre az ügyfélnek.")
     email = st.text_input("Email", key="pro_login_email")
     password = st.text_input("Jelszó", type="password", key="pro_login_password")
@@ -3091,7 +3091,7 @@ st.session_state["readonly_mode"] = readonly_mode
 # ------------------------------------------------------------
 # Header
 # ------------------------------------------------------------
-st.markdown('<div class="main-title">🏭 Gyártási Diagnosztika PRO SaaS V9 V4.1 V2 SaaS</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">🏭 Gyártási Diagnosztika PRO SaaS V9.1 V4.1 V2 SaaS</div>', unsafe_allow_html=True)
 st.markdown('<div class="subtitle">PRO SaaS verzió: emailes belépés, céges jogosultság, előfizetés-kezelés, tartós többhetes trendek és read-only mód lejárat után.</div>', unsafe_allow_html=True)
 
 
@@ -3125,6 +3125,16 @@ if uploaded is None and st.session_state.get("saved_workbook_tmp_path"):
     active_uploaded_name = st.session_state.get("saved_workbook_name", "saved.xlsx")
     week_label = st.session_state.get("saved_workbook_week", week_label)
 
+
+# Aktív adatforrás: friss feltöltés vagy mentett Excel
+active_uploaded_source = uploaded
+active_uploaded_name = uploaded.name if uploaded is not None else ""
+if uploaded is None and st.session_state.get("saved_workbook_tmp_path"):
+    active_uploaded_source = st.session_state.get("saved_workbook_tmp_path")
+    active_uploaded_name = st.session_state.get("saved_workbook_name", "saved.xlsx")
+    week_label = st.session_state.get("saved_workbook_week", week_label)
+current_upload_name = active_uploaded_name if active_uploaded_name else (uploaded.name if uploaded is not None else "")
+
 # ------------------------------------------------------------
 # Adatbetöltés
 # ------------------------------------------------------------
@@ -3148,6 +3158,12 @@ except Exception as exc:
 
 
 with st.sidebar:
+
+    if uploaded is not None and st.button("Feltöltött Excel mentése ehhez az időszakhoz", use_container_width=True):
+        saved_res = save_uploaded_workbook_to_supabase(uploaded, week_label)
+        if saved_res is not None:
+            st.success("Excel fájl mentve Supabase-be. Következő belépésnél a Mentett Excel betöltése részből visszahozható.")
+
     st.markdown("---")
     st.subheader("PRO előfizetés")
     st.write(f"Belépve: **{pro_user.get('email','')}**")
@@ -3728,8 +3744,8 @@ with tabs[7]:
 # 9. PRO trendek
 # ------------------------------------------------------------
 with tabs[8]:
-    st.subheader("PRO V9 trendmotor és mentett riportok")
-    st.caption("A DEMO egyszeri képet ad. A PRO V9 több időszak alapján mutatja: javulás, romlás, trend, előző időszakhoz képesti eltérés.")
+    st.subheader("PRO V9.1 trendmotor és mentett riportok")
+    st.caption("A DEMO egyszeri képet ad. A PRO V9.1 több időszak alapján mutatja: javulás, romlás, trend, előző időszakhoz képesti eltérés.")
 
     current_snapshot = build_pro_kpi_snapshot(
         filtered,
@@ -3741,12 +3757,8 @@ with tabs[8]:
     c1, c2 = st.columns(2)
     with c1:
         if st.button("Aktuális időszak mentése PRO trendhez", use_container_width=True, disabled=readonly_mode):
-            path = save_week_snapshot(company_name, week_label, current_snapshot, uploaded.name if uploaded else "")
+            path = save_week_snapshot(company_name, week_label, current_snapshot, current_upload_name)
             st.success("Mentve Supabase-be.")
-            if uploaded is not None:
-                save_uploaded_workbook_to_supabase(uploaded, week_label)
-                if uploaded is not None:
-                    save_uploaded_workbook_to_supabase(uploaded, week_label)
     with c2:
         st.info("Supabase mentés: az előzmények tartósan megmaradnak, és több hét/hónap trendjei összevethetők.")
 
@@ -3770,7 +3782,7 @@ with tabs[8]:
         else:
             st.dataframe(delta_df, use_container_width=True, hide_index=True)
 
-        st.markdown("### PRO V9 automatikus trendértékelés")
+        st.markdown("### PRO V9.1 automatikus trendértékelés")
         render_recommendations(build_trend_insights(hist))
 
         st.markdown("### Trenddiagramok")
