@@ -49,7 +49,7 @@ except NameError:
         PageBreak = None
 
 st.set_page_config(
-    page_title="Gyártási Diagnosztika PRO SaaS V12 V4.1 V2 SaaS.7.5.4.4.3.3.2.2",
+    page_title="Gyártási Diagnosztika PRO SaaS V13 V4.1 V2 SaaS.7.5.4.4.3.3.2.2",
     page_icon="🏭",
     layout="wide"
 )
@@ -706,7 +706,7 @@ def build_recommender_quality_notes(base_assignment: pd.DataFrame, opt_assignmen
 
 
 def build_trend_insights(history_df: pd.DataFrame) -> List[Tuple[str, str]]:
-    """PRO V12: vezetői trendmegállapítások több időszak alapján."""
+    """PRO V13: vezetői trendmegállapítások több időszak alapján."""
     if history_df is None or history_df.empty or len(history_df) < 2:
         return [("info", "Ments el legalább két időszakot, hogy trendmegállapítás készüljön.")]
 
@@ -1191,12 +1191,22 @@ def make_pdf_symbol_matrix(symbol_df: pd.DataFrame, width=500):
 
 
 def pdf_safe_text(x):
-    """PDF-kompatibilis magyar szöveg: ő/ű -> ö/ü."""
+    """PDF-kompatibilis magyar szöveg.
+
+    ReportLab alap Helvetica fonttal az ő/ű sok környezetben hibás.
+    Itt minden PDF-szövegben ő/ű -> ö/ü csere történik.
+    """
     if x is None:
         return ""
     txt = str(x)
-    repl = {"ő": "ö", "Ő": "Ö", "ű": "ü", "Ű": "Ü", "\u2013": "-", "\u2014": "-", "\u2026": "..."}
-    for a, b in repl.items():
+    replacements = {
+        "ő": "ö", "Ő": "Ö",
+        "ű": "ü", "Ű": "Ü",
+        "–": "-", "—": "-",
+        "„": '"', "”": '"', "“": '"',
+        "…": "...",
+    }
+    for a, b in replacements.items():
         txt = txt.replace(a, b)
     return txt
 
@@ -1839,17 +1849,18 @@ def _pdf_anchor(name):
 
 
 def _pdf_toc_table():
+    """Kattintható PDF tartalomjegyzék. A legtöbb PDF-olvasóban működik."""
     rows = [
         ["Oldal", "Szakasz", "Ugrás"],
-        ["1", "Executive Summary", '<link href="#exec">Megnyitás</link>'],
-        ["2", "Többhetes trendek", '<link href="#trends">Megnyitás</link>'],
-        ["3", "Gyökérok és pénzügyi fókusz", '<link href="#root">Megnyitás</link>'],
-        ["4", "Műszak- és gépdiagnosztika", '<link href="#machine">Megnyitás</link>'],
-        ["5", "Dolgozó-gép hőtérkép", '<link href="#heatmap">Megnyitás</link>'],
-        ["6", "Ajánlórendszer és what-if", '<link href="#ai">Megnyitás</link>'],
-        ["7", "Rendelés és kapacitás", '<link href="#orders">Megnyitás</link>'],
-        ["8", "Gyártási terv", '<link href="#plan">Megnyitás</link>'],
-        ["9", "Akcióterv", '<link href="#actions">Megnyitás</link>'],
+        ["1", "Executive Summary", '<a href="#exec">Megnyitás</a>'],
+        ["2", "Többhetes trendek", '<a href="#trends">Megnyitás</a>'],
+        ["3", "Gyökérok és pénzügyi fókusz", '<a href="#root">Megnyitás</a>'],
+        ["4", "Műszak- és gépdiagnosztika", '<a href="#machine">Megnyitás</a>'],
+        ["5", "Dolgozó-gép hőtérkép", '<a href="#heatmap">Megnyitás</a>'],
+        ["6", "Ajánlórendszer és what-if", '<a href="#ai">Megnyitás</a>'],
+        ["7", "Rendelés és kapacitás", '<a href="#orders">Megnyitás</a>'],
+        ["8", "Gyártási terv", '<a href="#plan">Megnyitás</a>'],
+        ["9", "Akcióterv", '<a href="#actions">Megnyitás</a>'],
     ]
     head = ParagraphStyle("TocHead", fontSize=8, textColor=colors.white, leading=9.5)
     cell = ParagraphStyle("TocCell", fontSize=8, textColor=colors.HexColor("#0f172a"), leading=9.5)
@@ -1875,7 +1886,6 @@ def _pdf_toc_table():
     t.setStyle(TableStyle(style))
     return t
 
-
 def build_pdf_report(
     df: pd.DataFrame,
     pair: pd.DataFrame,
@@ -1896,7 +1906,7 @@ def build_pdf_report(
     lost_revenue_df: pd.DataFrame = None,
     critical_orders_df: pd.DataFrame = None
 ) -> bytes:
-    """PRO V12: sokoldalas, tanácsadói jellegű vezetői PDF."""
+    """PRO V13: sokoldalas, tanácsadói jellegű vezetői PDF."""
     if SimpleDocTemplate is None:
         return None
 
@@ -1914,10 +1924,10 @@ def build_pdf_report(
         return Paragraph(pdf_safe_text(x), style)
 
     story = []
-    story.append(Paragraph("Gyártási Diagnosztika PRO - teljes vezetői riport", title_style))
+    story.append(Paragraph(pdf_safe_text("Gyártási Diagnosztika PRO - teljes vezetői riport"), title_style))
     story.append(P("Tanácsadói jellegű export: KPI-k, veszteségforrások, dolgozó-gép ajánlórendszer, what-if, kapacitás, rendeléskockázat és akcióterv.", subtitle_style))
     story.append(Spacer(1, 0.2*cm))
-    story.append(_pdf_executive_cover_box("PRO V12: prémium vezetői riport", "Ezt a riportot érdemes elküldeni mintaként: nem csak dashboard, hanem konkrét döntési és pénzügyi akciólista."))
+    story.append(_pdf_executive_cover_box("PRO V13: prémium vezetői riport", "Ezt a riportot érdemes elküldeni mintaként: nem csak dashboard, hanem konkrét döntési és pénzügyi akciólista."))
     story.append(Spacer(1, 0.2*cm))
     story.append(_pdf_pro_kpi_grid(df, fulfillment_df, capacity_df, impact_df))
     story.append(Spacer(1, 0.2*cm))
@@ -1928,7 +1938,7 @@ def build_pdf_report(
     story.append(_pdf_priority_matrix(impact_df, fulfillment_df, capacity_df))
 
 
-    # PRO V12: többhetes trendek a PDF-ben
+    # PRO V13: többhetes trendek a PDF-ben
     try:
         history_pdf_df = load_company_history(company_context.get("company_name", None)) if "company_context" in globals() else pd.DataFrame()
     except Exception:
@@ -3009,7 +3019,7 @@ def check_password():
     if st.session_state.password_ok:
         return True
 
-    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS V12 V4.1 V2 SaaS")
+    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS V13 V4.1 V2 SaaS")
     st.caption("Tesztjelszó alapértelmezetten: demo-pro-123. Élesben Streamlit Secrets: APP_PASSWORD.")
     pw = st.text_input("Jelszó", type="password")
     if st.button("Belépés"):
@@ -3166,7 +3176,7 @@ def bytes_to_temp_xlsx(raw_bytes: bytes):
 
 
 def save_week_snapshot(company, week_label, kpis, uploaded_name=""):
-    """PRO V12: Supabase mentés service role data clienttel, ha elérhető."""
+    """PRO V13: Supabase mentés service role data clienttel, ha elérhető."""
     if st.session_state.get("readonly_mode"):
         raise RuntimeError("Az előfizetés lejárt vagy inaktív. Új mentés nem engedélyezett.")
 
@@ -3292,7 +3302,7 @@ def login_required_pro():
     if st.session_state.get("pro_user"):
         return sb, st.session_state["pro_user"]
 
-    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS V12 V4.1 V2 SaaS")
+    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS V13 V4.1 V2 SaaS")
     st.caption("Előfizetőknek: belépés email + jelszóval. Fiókot az admin hoz létre az ügyfélnek.")
     email = st.text_input("Email", key="pro_login_email")
     password = st.text_input("Jelszó", type="password", key="pro_login_password")
@@ -3423,7 +3433,7 @@ st.session_state["readonly_mode"] = readonly_mode
 # ------------------------------------------------------------
 # Header
 # ------------------------------------------------------------
-st.markdown('<div class="main-title">🏭 Gyártási Diagnosztika PRO SaaS V12 V4.1 V2 SaaS</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">🏭 Gyártási Diagnosztika PRO SaaS V13 V4.1 V2 SaaS</div>', unsafe_allow_html=True)
 st.markdown('<div class="subtitle">PRO SaaS verzió: emailes belépés, céges jogosultság, előfizetés-kezelés, tartós többhetes trendek és read-only mód lejárat után.</div>', unsafe_allow_html=True)
 
 
@@ -3495,6 +3505,43 @@ with st.sidebar:
         saved_res = save_uploaded_workbook_to_supabase(uploaded, week_label)
         if saved_res is not None:
             st.success("Excel fájl mentve Supabase-be. Következő belépésnél a Mentett Excel betöltése részből visszahozható.")
+
+    st.markdown("---")
+    st.subheader("Mentett hetek / Excel fájlok")
+    saved_books_df = load_saved_workbooks_from_supabase()
+    if saved_books_df.empty:
+        st.caption("Még nincs mentett heti Excel ehhez a céghez. Tölts fel egy Excelt, majd kattints: Feltöltött Excel mentése ehhez az időszakhoz.")
+    else:
+        saved_books_df["label"] = saved_books_df["week"].astype(str) + " · " + saved_books_df["file_name"].astype(str)
+        selected_label = st.selectbox(
+            "Korábbi mentett hét",
+            ["-- nincs kiválasztva --"] + saved_books_df["label"].tolist(),
+            key="saved_workbook_select"
+        )
+        if selected_label != "-- nincs kiválasztva --":
+            selected_row = saved_books_df.loc[saved_books_df["label"].eq(selected_label)].iloc[0]
+            selected_saved_workbook_id = int(selected_row["id"])
+
+            col_load_saved, col_delete_saved = st.columns(2)
+            with col_load_saved:
+                if st.button("Betöltés", use_container_width=True, key="btn_load_saved_workbook"):
+                    loaded_saved = get_saved_workbook_bytes(selected_saved_workbook_id)
+                    if loaded_saved:
+                        raw_bytes, saved_name, saved_week = loaded_saved
+                        st.session_state["saved_workbook_tmp_path"] = bytes_to_temp_xlsx(raw_bytes)
+                        st.session_state["saved_workbook_name"] = saved_name
+                        st.session_state["saved_workbook_week"] = saved_week
+                        st.success(f"Betöltve: {saved_week} · {saved_name}")
+                        st.rerun()
+
+            with col_delete_saved:
+                if st.button("Törlés", use_container_width=True, key="btn_delete_saved_workbook"):
+                    if delete_saved_workbook_from_supabase(selected_saved_workbook_id):
+                        st.success("Mentett hét törölve.")
+                        st.session_state.pop("saved_workbook_tmp_path", None)
+                        st.session_state.pop("saved_workbook_name", None)
+                        st.session_state.pop("saved_workbook_week", None)
+                        st.rerun()
 
     st.markdown("---")
     st.subheader("PRO előfizetés")
@@ -4076,8 +4123,8 @@ with tabs[7]:
 # 9. PRO trendek
 # ------------------------------------------------------------
 with tabs[8]:
-    st.subheader("PRO V12 trendmotor és mentett riportok")
-    st.caption("A DEMO egyszeri képet ad. A PRO V12 több időszak alapján mutatja: javulás, romlás, trend, előző időszakhoz képesti eltérés.")
+    st.subheader("PRO V13 trendmotor és mentett riportok")
+    st.caption("A DEMO egyszeri képet ad. A PRO V13 több időszak alapján mutatja: javulás, romlás, trend, előző időszakhoz képesti eltérés.")
 
     current_snapshot = build_pro_kpi_snapshot(
         filtered,
@@ -4114,7 +4161,7 @@ with tabs[8]:
         else:
             st.dataframe(delta_df, use_container_width=True, hide_index=True)
 
-        st.markdown("### PRO V12 automatikus trendértékelés")
+        st.markdown("### PRO V13 automatikus trendértékelés")
         render_recommendations(build_trend_insights(hist))
 
         st.markdown("### Trenddiagramok")
