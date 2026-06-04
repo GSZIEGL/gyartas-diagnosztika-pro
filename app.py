@@ -12,6 +12,8 @@ def safe_completion_pct(planned, demand):
 import io
 import os
 import json
+import base64
+import tempfile
 from datetime import datetime, date as dt_date
 from pathlib import Path
 
@@ -47,7 +49,7 @@ except NameError:
         PageBreak = None
 
 st.set_page_config(
-    page_title="Gyártási Diagnosztika PRO SaaS V8 V4.1 V2 SaaS.7.5.4.4.3.3.2.2",
+    page_title="Gyártási Diagnosztika PRO SaaS V9 V4.1 V2 SaaS.7.5.4.4.3.3.2.2",
     page_icon="🏭",
     layout="wide"
 )
@@ -186,7 +188,7 @@ def show_kpi(label: str, value: str, note: str = ""):
 
 
 def safe_read_excel(uploaded_file) -> Dict[str, pd.DataFrame]:
-    return pd.read_excel(uploaded_file, sheet_name=None)
+    return pd.read_excel(active_uploaded_source_file, sheet_name=None)
 
 
 def find_sheet(sheets: Dict[str, pd.DataFrame], possible_names: List[str]) -> pd.DataFrame:
@@ -490,6 +492,7 @@ def build_ai_optimized_assignment_v2(pair: pd.DataFrame, unavailable_workers=Non
             "Kompatibilitási_pont": round(float(best.get("Kompatibilitási_pont", 0)), 1),
             "Várható_teljesítmény_%": round(float(best.get("Átlag_teljesítmény", 0)), 1),
             "Várható_selejt_%": round(float(best.get("Selejt_%", 0)), 2),
+            "Várható fedezet/db": round(float(best.get("Fedezet/db", best.get("Fedezet/óra", 0))), 0),
         })
     return pd.DataFrame(rows).sort_values("Gép")
 
@@ -680,7 +683,7 @@ def build_recommender_quality_notes(base_assignment: pd.DataFrame, opt_assignmen
 
 
 def build_trend_insights(history_df: pd.DataFrame) -> List[Tuple[str, str]]:
-    """PRO V8: vezetői trendmegállapítások több időszak alapján."""
+    """PRO V9: vezetői trendmegállapítások több időszak alapján."""
     if history_df is None or history_df.empty or len(history_df) < 2:
         return [("info", "Ments el legalább két időszakot, hogy trendmegállapítás készüljön.")]
 
@@ -1602,7 +1605,7 @@ def build_pdf_report(
     lost_revenue_df: pd.DataFrame = None,
     critical_orders_df: pd.DataFrame = None
 ) -> bytes:
-    """PRO V8: sokoldalas, tanácsadói jellegű vezetői PDF."""
+    """PRO V9: sokoldalas, tanácsadói jellegű vezetői PDF."""
     if SimpleDocTemplate is None:
         return None
 
@@ -1769,28 +1772,28 @@ def optimized_assignment(
     return pd.DataFrame(assignments).sort_values("Gép")
 
 
-def compare_assignment_scenarios(pair: pd.DataFrame, current_assignment: pd.DataFrame, optimized: pd.DataFrame) -> pd.DataFrame:
-    """Egyszerű összehasonlítás a mostani V1 és optimalizált beosztás között."""
-    if optimized is None or optimized.empty:
-        return pd.DataFrame([{
-            "Mutató": "Optimalizált beosztás",
-            "Érték": "Nincs elég adat / túl sok kizárás"
-        }])
+def compare_assignment_scenarios(pair, current_assignment, optimized):
+    """Jelenlegi vs optimalizált beosztás összehasonlítása hibatűrően."""
+    def safe_mean(df, candidates):
+        if df is None or df.empty:
+            return 0.0
+        for c in candidates:
+            if c in df.columns:
+                return float(pd.to_numeric(df[c], errors="coerce").fillna(0).mean())
+        return 0.0
 
-    current_score = current_assignment["Kompatibilitási_pont"].mean() if not current_assignment.empty else np.nan
-    opt_score = optimized["Kompatibilitási_pont"].mean()
-    current_fedezet = current_assignment["Fedezet/db"].mean() if "Fedezet/db" in current_assignment.columns and not current_assignment.empty else np.nan
-    opt_fedezet = optimized["Várható fedezet/db"].mean()
+    cur_perf = safe_mean(current_assignment, ["Átlag_teljesítmény", "Várható_teljesítmény_%", "Teljesítmény_%"])
+    opt_perf = safe_mean(optimized, ["Várható_teljesítmény_%", "Átlag_teljesítmény", "Teljesítmény_%"])
+    cur_scrap = safe_mean(current_assignment, ["Selejt_%", "Várható_selejt_%"])
+    opt_scrap = safe_mean(optimized, ["Várható_selejt_%", "Selejt_%"])
+    cur_fedezet = safe_mean(current_assignment, ["Fedezet/db", "Fedezet/óra", "Várható fedezet/db", "Várható_fedezet_óra"])
+    opt_fedezet = safe_mean(optimized, ["Várható fedezet/db", "Várható_fedezet_óra", "Fedezet/db", "Fedezet/óra"])
 
-    rows = [
-        {"Mutató": "Átlag kompatibilitási pont", "Jelenlegi egyszerű ajánlás": round(current_score, 1), "Optimalizált": round(opt_score, 1), "Változás": round(opt_score - current_score, 1) if pd.notna(current_score) else "-"},
-        {"Mutató": "Átlag fedezet/db", "Jelenlegi egyszerű ajánlás": round(current_fedezet, 0) if pd.notna(current_fedezet) else "-", "Optimalizált": round(opt_fedezet, 0), "Változás": round(opt_fedezet - current_fedezet, 0) if pd.notna(current_fedezet) else "-"},
-        {"Mutató": "Beosztott gépek száma", "Jelenlegi egyszerű ajánlás": len(current_assignment), "Optimalizált": len(optimized), "Változás": len(optimized) - len(current_assignment)},
-    ]
-    return pd.DataFrame(rows)
-
-
-
+    return pd.DataFrame([
+        {"Mutató": "Teljesítmény", "Jelenlegi": round(cur_perf, 2), "Optimalizált": round(opt_perf, 2), "Változás": round(opt_perf - cur_perf, 2)},
+        {"Mutató": "Selejt %", "Jelenlegi": round(cur_scrap, 2), "Optimalizált": round(opt_scrap, 2), "Változás": round(opt_scrap - cur_scrap, 2)},
+        {"Mutató": "Fedezet", "Jelenlegi": round(cur_fedezet, 2), "Optimalizált": round(opt_fedezet, 2), "Változás": round(opt_fedezet - cur_fedezet, 2)},
+    ])
 
 def normalize_orders(orders_raw: pd.DataFrame) -> pd.DataFrame:
     """Opcionális Megrendelesek munkalap feldolgozása."""
@@ -2687,7 +2690,7 @@ def check_password():
     if st.session_state.password_ok:
         return True
 
-    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS V8 V4.1 V2 SaaS")
+    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS V9 V4.1 V2 SaaS")
     st.caption("Tesztjelszó alapértelmezetten: demo-pro-123. Élesben Streamlit Secrets: APP_PASSWORD.")
     pw = st.text_input("Jelszó", type="password")
     if st.button("Belépés"):
@@ -2746,8 +2749,92 @@ def get_supabase_data_client():
     url = str(url).replace("/rest/v1/", "").rstrip("/")
     return create_client(url, key)
 
+
+def save_uploaded_workbook_to_supabase(uploaded_file, week_label: str):
+    """Eredeti feltöltött Excel tartós mentése Supabase-be."""
+    if uploaded_file is None or st.session_state.get("readonly_mode"):
+        return None
+    client = get_supabase_data_client()
+    if client is None:
+        return None
+
+    ctx = st.session_state.get("company_context", {})
+    user = st.session_state.get("pro_user", {})
+    company_id = ctx.get("company_id")
+    if not company_id:
+        return None
+
+    try:
+        raw = uploaded_file.getvalue()
+        b64 = base64.b64encode(raw).decode("utf-8")
+        payload = {
+            "company_id": company_id,
+            "user_id": user.get("id"),
+            "week": str(week_label),
+            "file_name": getattr(uploaded_file, "name", "uploaded.xlsx"),
+            "file_bytes_b64": b64,
+            "uploaded_at": datetime.now().isoformat(timespec="seconds"),
+        }
+        return client.table("uploaded_workbooks").upsert(payload, on_conflict="company_id,week").execute()
+    except Exception as exc:
+        st.warning(f"Excel tartós mentése sikertelen: {exc}")
+        return None
+
+
+def load_saved_workbooks_from_supabase():
+    """Mentett Excel fájlok listája."""
+    client = get_supabase_data_client()
+    if client is None:
+        return pd.DataFrame()
+    ctx = st.session_state.get("company_context", {})
+    company_id = ctx.get("company_id")
+    if not company_id:
+        return pd.DataFrame()
+    try:
+        res = (
+            client.table("uploaded_workbooks")
+            .select("id, company_id, week, file_name, uploaded_at")
+            .eq("company_id", company_id)
+            .order("week")
+            .execute()
+        )
+        return pd.DataFrame(res.data or [])
+    except Exception as exc:
+        st.warning(f"Mentett Excel-lista betöltése sikertelen: {exc}")
+        return pd.DataFrame()
+
+
+def get_saved_workbook_bytes(workbook_id):
+    """Mentett Excel bytes betöltése."""
+    client = get_supabase_data_client()
+    if client is None or workbook_id is None:
+        return None
+    try:
+        res = (
+            client.table("uploaded_workbooks")
+            .select("file_bytes_b64, file_name, week")
+            .eq("id", int(workbook_id))
+            .single()
+            .execute()
+        )
+        row = res.data or {}
+        raw = base64.b64decode(row.get("file_bytes_b64", ""))
+        return raw, row.get("file_name", "saved.xlsx"), row.get("week", "")
+    except Exception as exc:
+        st.warning(f"Mentett Excel betöltése sikertelen: {exc}")
+        return None
+
+
+def bytes_to_temp_xlsx(raw_bytes: bytes):
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+    tmp.write(raw_bytes)
+    tmp.flush()
+    tmp.close()
+    return tmp.name
+
+
 def save_week_snapshot(company, week_label, kpis, uploaded_name=""):
-    """PRO V8: Supabase mentés service role data clienttel, ha elérhető."""
+    """PRO V9: Supabase mentés service role data clienttel, ha elérhető."""
     if st.session_state.get("readonly_mode"):
         raise RuntimeError("Az előfizetés lejárt vagy inaktív. Új mentés nem engedélyezett.")
 
@@ -2873,7 +2960,7 @@ def login_required_pro():
     if st.session_state.get("pro_user"):
         return sb, st.session_state["pro_user"]
 
-    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS V8 V4.1 V2 SaaS")
+    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS V9 V4.1 V2 SaaS")
     st.caption("Előfizetőknek: belépés email + jelszóval. Fiókot az admin hoz létre az ügyfélnek.")
     email = st.text_input("Email", key="pro_login_email")
     password = st.text_input("Jelszó", type="password", key="pro_login_password")
@@ -3004,7 +3091,7 @@ st.session_state["readonly_mode"] = readonly_mode
 # ------------------------------------------------------------
 # Header
 # ------------------------------------------------------------
-st.markdown('<div class="main-title">🏭 Gyártási Diagnosztika PRO SaaS V8 V4.1 V2 SaaS</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">🏭 Gyártási Diagnosztika PRO SaaS V9 V4.1 V2 SaaS</div>', unsafe_allow_html=True)
 st.markdown('<div class="subtitle">PRO SaaS verzió: emailes belépés, céges jogosultság, előfizetés-kezelés, tartós többhetes trendek és read-only mód lejárat után.</div>', unsafe_allow_html=True)
 
 
@@ -3028,6 +3115,15 @@ if uploaded is None:
 
 if readonly_mode:
     st.warning("READ-ONLY mód: az előfizetés lejárt vagy inaktív. A korábbi adatok megtekinthetők, de új mentés nem engedélyezett.")
+
+
+# Aktív adatforrás: friss feltöltés vagy mentett Excel
+active_uploaded_source = uploaded
+active_uploaded_name = uploaded.name if uploaded is not None else ""
+if uploaded is None and st.session_state.get("saved_workbook_tmp_path"):
+    active_uploaded_source = st.session_state.get("saved_workbook_tmp_path")
+    active_uploaded_name = st.session_state.get("saved_workbook_name", "saved.xlsx")
+    week_label = st.session_state.get("saved_workbook_week", week_label)
 
 # ------------------------------------------------------------
 # Adatbetöltés
@@ -3632,8 +3728,8 @@ with tabs[7]:
 # 9. PRO trendek
 # ------------------------------------------------------------
 with tabs[8]:
-    st.subheader("PRO V8 trendmotor és mentett riportok")
-    st.caption("A DEMO egyszeri képet ad. A PRO V8 több időszak alapján mutatja: javulás, romlás, trend, előző időszakhoz képesti eltérés.")
+    st.subheader("PRO V9 trendmotor és mentett riportok")
+    st.caption("A DEMO egyszeri képet ad. A PRO V9 több időszak alapján mutatja: javulás, romlás, trend, előző időszakhoz képesti eltérés.")
 
     current_snapshot = build_pro_kpi_snapshot(
         filtered,
@@ -3647,6 +3743,10 @@ with tabs[8]:
         if st.button("Aktuális időszak mentése PRO trendhez", use_container_width=True, disabled=readonly_mode):
             path = save_week_snapshot(company_name, week_label, current_snapshot, uploaded.name if uploaded else "")
             st.success("Mentve Supabase-be.")
+            if uploaded is not None:
+                save_uploaded_workbook_to_supabase(uploaded, week_label)
+                if uploaded is not None:
+                    save_uploaded_workbook_to_supabase(uploaded, week_label)
     with c2:
         st.info("Supabase mentés: az előzmények tartósan megmaradnak, és több hét/hónap trendjei összevethetők.")
 
@@ -3670,7 +3770,7 @@ with tabs[8]:
         else:
             st.dataframe(delta_df, use_container_width=True, hide_index=True)
 
-        st.markdown("### PRO V8 automatikus trendértékelés")
+        st.markdown("### PRO V9 automatikus trendértékelés")
         render_recommendations(build_trend_insights(hist))
 
         st.markdown("### Trenddiagramok")
