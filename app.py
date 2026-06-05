@@ -10,9 +10,9 @@ def safe_completion_pct(planned, demand):
 
 
 import io
-import re
 import os
 import json
+import re
 import base64
 import tempfile
 from datetime import datetime, date as dt_date
@@ -50,7 +50,7 @@ except NameError:
         PageBreak = None
 
 st.set_page_config(
-    page_title="Gyártási Diagnosztika PRO SaaS V20 V4.1 V2 SaaS.7.5.4.4.3.3.2.2",
+    page_title="Gyártási Diagnosztika PRO SaaS V20.1 V4.1 V2 SaaS.7.5.4.4.3.3.2.2",
     page_icon="🏭",
     layout="wide"
 )
@@ -707,7 +707,7 @@ def build_recommender_quality_notes(base_assignment: pd.DataFrame, opt_assignmen
 
 
 def build_trend_insights(history_df: pd.DataFrame) -> List[Tuple[str, str]]:
-    """PRO V20: vezetői trendmegállapítások több időszak alapján."""
+    """PRO V20.1: vezetői trendmegállapítások több időszak alapján."""
     if history_df is None or history_df.empty or len(history_df) < 2:
         return [("info", "Ments el legalább két időszakot, hogy trendmegállapítás készüljön.")]
 
@@ -1959,7 +1959,7 @@ def build_pdf_report(
     lost_revenue_df: pd.DataFrame = None,
     critical_orders_df: pd.DataFrame = None
 ) -> bytes:
-    """PRO V20: sokoldalas, tanácsadói jellegű vezetői PDF."""
+    """PRO V20.1: sokoldalas, tanácsadói jellegű vezetői PDF."""
     if SimpleDocTemplate is None:
         return None
 
@@ -1980,7 +1980,7 @@ def build_pdf_report(
     story.append(Paragraph(pdf_safe_text("Gyártási Diagnosztika PRO - teljes vezetői riport"), title_style))
     story.append(P("Tanácsadói jellegű export: KPI-k, veszteségforrások, dolgozó-gép ajánlórendszer, what-if, kapacitás, rendeléskockázat és akcióterv.", subtitle_style))
     story.append(Spacer(1, 0.2*cm))
-    story.append(_pdf_executive_cover_box("PRO V20: prémium vezetői riport", "Ezt a riportot érdemes elküldeni mintaként: nem csak dashboard, hanem konkrét döntési és pénzügyi akciólista."))
+    story.append(_pdf_executive_cover_box("PRO V20.1: prémium vezetői riport", "Ezt a riportot érdemes elküldeni mintaként: nem csak dashboard, hanem konkrét döntési és pénzügyi akciólista."))
     story.append(Spacer(1, 0.2*cm))
     story.append(_pdf_anchor_v14("exec"))
     story.append(_pdf_pro_kpi_grid(df, fulfillment_df, capacity_df, impact_df))
@@ -1996,7 +1996,7 @@ def build_pdf_report(
     story.append(_pdf_priority_matrix(impact_df, fulfillment_df, capacity_df))
 
 
-    # PRO V20: többhetes trendek a PDF-ben
+    # PRO V20.1: többhetes trendek a PDF-ben
     try:
         history_pdf_df = load_company_history(company_context.get("company_name", None)) if "company_context" in globals() else pd.DataFrame()
     except Exception:
@@ -3203,7 +3203,7 @@ def check_password():
     if st.session_state.password_ok:
         return True
 
-    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS V20 V4.1 V2 SaaS")
+    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS V20.1 V4.1 V2 SaaS")
     st.caption("Tesztjelszó alapértelmezetten: demo-pro-123. Élesben Streamlit Secrets: APP_PASSWORD.")
     pw = st.text_input("Jelszó", type="password")
     if st.button("Belépés"):
@@ -3552,24 +3552,33 @@ def get_latest_saved_workbook_row():
 
 
 def autoload_latest_saved_workbook_if_needed(uploaded):
-    """Ha nincs friss feltöltés, automatikusan betölti az utolsó mentett Excelt."""
+    """Ha nincs friss feltöltés, automatikusan betölti az utolsó mentett Excelt.
+
+    True-t ad vissza, ha most töltött be valamit, hogy az app egyből újrarajzolható legyen.
+    """
     if uploaded is not None:
-        return
+        return False
     if st.session_state.get("saved_workbook_tmp_path"):
-        return
+        return False
+    if st.session_state.get("autoload_attempted_latest"):
+        return False
+
+    st.session_state["autoload_attempted_latest"] = True
     latest = get_latest_saved_workbook_row()
     if not latest:
-        return
+        return False
+
     loaded = get_saved_workbook_bytes(latest.get("id"))
     if not loaded:
-        return
+        return False
+
     raw_bytes, saved_name, saved_week = loaded
     st.session_state["saved_workbook_tmp_path"] = bytes_to_temp_xlsx(raw_bytes)
     st.session_state["saved_workbook_name"] = saved_name
     st.session_state["saved_workbook_week"] = saved_week
     st.session_state["week_label_input"] = str(saved_week)
     st.session_state["autoloaded_latest_week"] = str(saved_week)
-
+    return True
 
 def delete_saved_workbook_from_supabase(workbook_id):
     """Mentett Excel törlése Supabase-ből."""
@@ -3644,7 +3653,7 @@ def save_current_period_full(uploaded_file, period_label: str, company_name: str
 
 
 def save_week_snapshot(company, week_label, kpis, uploaded_name=""):
-    """PRO V20: Supabase mentés service role data clienttel, ha elérhető."""
+    """PRO V20.1: Supabase mentés service role data clienttel, ha elérhető."""
     if st.session_state.get("readonly_mode"):
         raise RuntimeError("Az előfizetés lejárt vagy inaktív. Új mentés nem engedélyezett.")
 
@@ -3770,7 +3779,7 @@ def login_required_pro():
     if st.session_state.get("pro_user"):
         return sb, st.session_state["pro_user"]
 
-    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS V20 V4.1 V2 SaaS")
+    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS V20.1 V4.1 V2 SaaS")
     st.caption("Előfizetőknek: belépés email + jelszóval. Fiókot az admin hoz létre az ügyfélnek.")
     email = st.text_input("Email", key="pro_login_email")
     password = st.text_input("Jelszó", type="password", key="pro_login_password")
@@ -3901,7 +3910,7 @@ st.session_state["readonly_mode"] = readonly_mode
 # ------------------------------------------------------------
 # Header
 # ------------------------------------------------------------
-st.markdown('<div class="main-title">🏭 Gyártási Diagnosztika PRO SaaS V20 V4.1 V2 SaaS</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">🏭 Gyártási Diagnosztika PRO SaaS V20.1 V4.1 V2 SaaS</div>', unsafe_allow_html=True)
 st.markdown('<div class="subtitle">PRO SaaS verzió: emailes belépés, céges jogosultság, előfizetés-kezelés, tartós többhetes trendek és read-only mód lejárat után.</div>', unsafe_allow_html=True)
 
 
@@ -3927,6 +3936,9 @@ if readonly_mode:
     st.warning("READ-ONLY mód: az előfizetés lejárt vagy inaktív. A korábbi adatok megtekinthetők, de új mentés nem engedélyezett.")
 
 
+if autoload_latest_saved_workbook_if_needed(uploaded):
+    st.rerun()
+
 # Aktív adatforrás: friss feltöltés vagy mentett Excel
 active_uploaded_source = uploaded
 active_uploaded_name = uploaded.name if uploaded is not None else ""
@@ -3943,7 +3955,7 @@ if uploaded is None and st.session_state.get("saved_workbook_tmp_path"):
     active_uploaded_name = st.session_state.get("saved_workbook_name", "saved.xlsx")
 current_upload_name = active_uploaded_name if active_uploaded_name else (uploaded.name if uploaded is not None else "")
 if st.session_state.get("autoloaded_latest_week"):
-    st.info(f"Automatikusan betöltve az utolsó mentett hét: {st.session_state.get('autoloaded_latest_week')}")
+    st.success(f"Utolsó mentett hét automatikusan betöltve: {st.session_state.get('autoloaded_latest_week')}")
 
 # ------------------------------------------------------------
 # Adatbetöltés
@@ -3951,7 +3963,7 @@ if st.session_state.get("autoloaded_latest_week"):
 try:
     sheets = safe_read_excel(uploaded)
 
-    # PRO V20: Excel Mapper + mentett import profil
+    # PRO V20.1: Excel Mapper + mentett import profil
     selected_profile = get_selected_import_profile()
     applied = apply_saved_import_profile_to_sheets(sheets, selected_profile) if selected_profile else None
 
@@ -4631,8 +4643,8 @@ with tabs[7]:
 # 9. PRO trendek
 # ------------------------------------------------------------
 with tabs[8]:
-    st.subheader("PRO V20 trendmotor és mentett riportok")
-    st.caption("A DEMO egyszeri képet ad. A PRO V20 több időszak alapján mutatja: javulás, romlás, trend, előző időszakhoz képesti eltérés.")
+    st.subheader("PRO V20.1 trendmotor és mentett riportok")
+    st.caption("A DEMO egyszeri képet ad. A PRO V20.1 több időszak alapján mutatja: javulás, romlás, trend, előző időszakhoz képesti eltérés.")
 
     st.info(
         "Az adatkezelés mostantól a bal oldali sávban történik: Excel feltöltés, mentés, betöltés és törlés. "
@@ -4659,7 +4671,7 @@ with tabs[8]:
         else:
             st.dataframe(delta_df, use_container_width=True, hide_index=True)
 
-        st.markdown("### PRO V20 automatikus trendértékelés")
+        st.markdown("### PRO V20.1 automatikus trendértékelés")
         render_recommendations(build_trend_insights(hist))
 
         st.markdown("### Trenddiagramok")
