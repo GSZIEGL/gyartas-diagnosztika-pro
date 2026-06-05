@@ -49,7 +49,7 @@ except NameError:
         PageBreak = None
 
 st.set_page_config(
-    page_title="Gyártási Diagnosztika PRO SaaS V18.1 V4.1 V2 SaaS.7.5.4.4.3.3.2.2",
+    page_title="Gyártási Diagnosztika PRO SaaS V20 V4.1 V2 SaaS.7.5.4.4.3.3.2.2",
     page_icon="🏭",
     layout="wide"
 )
@@ -706,7 +706,7 @@ def build_recommender_quality_notes(base_assignment: pd.DataFrame, opt_assignmen
 
 
 def build_trend_insights(history_df: pd.DataFrame) -> List[Tuple[str, str]]:
-    """PRO V18.1: vezetői trendmegállapítások több időszak alapján."""
+    """PRO V20: vezetői trendmegállapítások több időszak alapján."""
     if history_df is None or history_df.empty or len(history_df) < 2:
         return [("info", "Ments el legalább két időszakot, hogy trendmegállapítás készüljön.")]
 
@@ -1958,7 +1958,7 @@ def build_pdf_report(
     lost_revenue_df: pd.DataFrame = None,
     critical_orders_df: pd.DataFrame = None
 ) -> bytes:
-    """PRO V18.1: sokoldalas, tanácsadói jellegű vezetői PDF."""
+    """PRO V20: sokoldalas, tanácsadói jellegű vezetői PDF."""
     if SimpleDocTemplate is None:
         return None
 
@@ -1979,7 +1979,7 @@ def build_pdf_report(
     story.append(Paragraph(pdf_safe_text("Gyártási Diagnosztika PRO - teljes vezetői riport"), title_style))
     story.append(P("Tanácsadói jellegű export: KPI-k, veszteségforrások, dolgozó-gép ajánlórendszer, what-if, kapacitás, rendeléskockázat és akcióterv.", subtitle_style))
     story.append(Spacer(1, 0.2*cm))
-    story.append(_pdf_executive_cover_box("PRO V18.1: prémium vezetői riport", "Ezt a riportot érdemes elküldeni mintaként: nem csak dashboard, hanem konkrét döntési és pénzügyi akciólista."))
+    story.append(_pdf_executive_cover_box("PRO V20: prémium vezetői riport", "Ezt a riportot érdemes elküldeni mintaként: nem csak dashboard, hanem konkrét döntési és pénzügyi akciólista."))
     story.append(Spacer(1, 0.2*cm))
     story.append(_pdf_anchor_v14("exec"))
     story.append(_pdf_pro_kpi_grid(df, fulfillment_df, capacity_df, impact_df))
@@ -1995,7 +1995,7 @@ def build_pdf_report(
     story.append(_pdf_priority_matrix(impact_df, fulfillment_df, capacity_df))
 
 
-    # PRO V18.1: többhetes trendek a PDF-ben
+    # PRO V20: többhetes trendek a PDF-ben
     try:
         history_pdf_df = load_company_history(company_context.get("company_name", None)) if "company_context" in globals() else pd.DataFrame()
     except Exception:
@@ -2927,72 +2927,174 @@ def generate_root_cause_insights(df: pd.DataFrame, pair: pd.DataFrame, impact_df
 # PRO.4.3.2 Excel Mapper / standardizáló réteg
 # ------------------------------------------------------------
 STANDARD_SHEET_HINTS = {
-    "production": ["termeles", "termelés", "production", "gyartas", "gyártás", "data", "adat", "riport"],
-    "machines": ["gepek", "gépek", "machines", "machine", "equipment", "eszkoz", "eszköz"],
-    "products": ["termekek", "termékek", "products", "product", "cikk", "cikkek"],
-    "orders": ["megrendelesek", "megrendelések", "rendelesek", "rendelések", "orders", "orderbook", "order_book"],
+    "production": ["termeles", "termelés", "production", "production export", "gyartas", "gyártás", "gyártási", "data", "adat", "riport", "erp_raw", "napi gyártási export"],
+    "machines": ["gepek", "gépek", "machines", "machine", "machine master", "equipment", "eszkoz", "eszköz", "berendezés", "berendezések", "berendezes", "berendezesek"],
+    "products": ["termekek", "termékek", "products", "product", "item master", "cikk", "cikkek", "cikktörzs", "cikktorzs"],
+    "orders": ["megrendelesek", "megrendelések", "rendelesek", "rendelések", "orders", "open orders", "orderbook", "order_book", "rendeléslista", "rendeleslista"],
 }
 
 COLUMN_SYNONYMS = {
-    "Dátum": ["dátum", "datum", "date", "nap", "day", "termeles dátuma", "termelés dátuma", "production date"],
-    "Műszak": ["műszak", "muszak", "shift", "turnus"],
-    "Dolgozó": ["dolgozó", "dolgozo", "operator", "operátor", "employee", "worker", "munkavállaló", "munkavallalo", "név", "nev"],
-    "Gép": ["gép", "gep", "machine", "machine id", "equipment", "berendezés", "berendezes", "sor", "line"],
-    "Termék": ["termék", "termek", "product", "item", "cikk", "sku", "cikkszám", "cikkszam"],
-    "Gyártott_db": ["gyártott_db", "gyartott_db", "gyártott db", "gyartott db", "qty", "quantity", "output", "darab", "db", "produced", "produced_qty", "jó+selejt"],
-    "Selejt_db": ["selejt_db", "selejt db", "scrap", "reject", "rejects", "defect", "defects", "selejt", "bad_qty"],
-    "Állásidő_perc": ["állásidő_perc", "allasido_perc", "állásidő", "allasido", "downtime", "downtime_min", "stop time", "állás perc", "allas perc"],
-    "Kapacitás_db_óra": ["kapacitás_db_óra", "kapacitas_db_ora", "capacity", "capacity_per_hour", "db/óra", "db/ora", "névleges kapacitás", "nevleges kapacitas"],
-    "Óradíj": ["óradíj", "oradij", "hourly cost", "machine cost", "cost/hour", "gép óradíj", "gep oradij"],
-    "Kritikus_gép": ["kritikus_gép", "kritikus gep", "critical", "critical machine", "kritikus"],
-    "Elérhető_óra_nap": ["elérhető_óra_nap", "elerheto_ora_nap", "available hours", "available_hours_day", "óra/nap", "ora/nap"],
-    "Eladási_ár": ["eladási_ár", "eladasi_ar", "price", "sales price", "unit price", "ár", "ar"],
-    "Anyagköltség": ["anyagköltség", "anyagkoltseg", "material cost", "material", "unit material", "anyag"],
-    "Prioritási_súly": ["prioritási_súly", "prioritasi_suly", "priority weight", "weight", "súly", "suly"],
-    "Rendelés_ID": ["rendelés_id", "rendeles_id", "order id", "order_id", "order", "po", "rendelésszám", "rendelesszam"],
-    "Vevő": ["vevő", "vevo", "customer", "client", "partner"],
-    "Rendelt_db": ["rendelt_db", "rendelt db", "ordered qty", "order qty", "quantity", "qty", "igény", "igeny"],
-    "Határidő": ["határidő", "hatarido", "due date", "deadline", "delivery date", "szállítás", "szallitas"],
-    "Prioritás": ["prioritás", "prioritas", "priority", "fontosság", "fontossag"],
-}
+    # Termelés
+    "Dátum": [
+        "dátum", "datum", "date", "nap", "day", "termeles dátuma", "termelés dátuma",
+        "production date", "productiondate", "production_date", "gyártási nap"
+    ],
+    "Műszak": [
+        "műszak", "muszak", "shift", "shift code", "shiftcode", "műszakkód", "muszakkod", "turnus"
+    ],
+    "Dolgozó": [
+        "dolgozó", "dolgozo", "operator", "operator name", "operatorname", "operátor",
+        "employee", "worker", "munkavállaló", "munkavallalo", "név", "nev", "operatorname"
+    ],
+    "Gép": [
+        "gép", "gep", "machine", "machine id", "machineid", "work center", "workcenter",
+        "equipment", "berendezés", "berendezes", "sor", "line", "munkaállomás", "munkaallomas"
+    ],
+    "Termék": [
+        "termék", "termek", "product", "item", "item code", "itemcode", "cikk", "sku",
+        "cikkszám", "cikkszam", "cikk szám", "cikk szam"
+    ],
+    "Gyártott_db": [
+        "gyártott_db", "gyartott_db", "gyártott db", "gyartott db", "qty", "quantity",
+        "output", "darab", "db", "produced", "produced pcs", "producedpcs", "produced_qty",
+        "good qty", "goodqty", "jó darab", "jo darab", "jó db", "jo db", "jódarab", "jodarabb",
+        "qty good", "good quantity"
+    ],
+    "Selejt_db": [
+        "selejt_db", "selejt db", "scrap", "scrap qty", "scrapqty", "reject", "rejects",
+        "rejected pcs", "rejectedpcs", "defect", "defects", "selejt", "bad_qty",
+        "hibás darab", "hibas darab", "hibás db", "hibas db", "rossz db"
+    ],
+    "Állásidő_perc": [
+        "állásidő_perc", "allasido_perc", "állásidő", "allasido", "downtime",
+        "downtime min", "downtimemin", "downtime minutes", "downtimeminutes",
+        "stop time", "stop time min", "stoptimemin", "állás perc", "allas perc",
+        "kiesés perc", "kieses perc", "kiesés", "kieses"
+    ],
 
+    # Géptörzs
+    "Kapacitás_db_óra": [
+        "kapacitás_db_óra", "kapacitas_db_ora", "capacity", "cap h", "cap/h", "cap per h",
+        "capacity per hour", "capacityperhour", "capacity_per_hour", "db/óra", "db/ora",
+        "óránkénti kapacitás", "orankenti kapacitas", "névleges kapacitás", "nevleges kapacitas"
+    ],
+    "Óradíj": [
+        "óradíj", "oradij", "hourly cost", "hourlycost", "machine cost", "machinecost",
+        "cost/hour", "cost h", "costh", "gép óradíj", "gep oradij", "gépköltség_óra", "gepkoltseg ora"
+    ],
+    "Kritikus_gép": [
+        "kritikus_gép", "kritikus gep", "critical", "critical machine", "criticalmachine", "kritikus"
+    ],
+    "Elérhető_óra_nap": [
+        "elérhető_óra_nap", "elerheto_ora_nap", "available hours", "availablehours",
+        "available h/day", "availablehday", "available hours per day", "availablehoursperday",
+        "napi rendelkezésre állás", "napi rendelkezesre allas", "óra/nap", "ora/nap"
+    ],
+
+    # Terméktörzs
+    "Eladási_ár": [
+        "eladási_ár", "eladasi_ar", "price", "sales price", "salesprice",
+        "unit price", "unitprice", "unit selling price", "unitsellingprice", "egységár", "egysegar", "ár", "ar"
+    ],
+    "Anyagköltség": [
+        "anyagköltség", "anyagkoltseg", "material cost", "materialcost", "material unit cost",
+        "materialunitcost", "material", "unit material", "anyag", "anyagár", "anyagar"
+    ],
+    "Prioritási_súly": [
+        "prioritási_súly", "prioritasi_suly", "priority weight", "priorityweight",
+        "weight", "súly", "suly", "fontosság", "fontossag", "priority"
+    ],
+
+    # Megrendelések
+    "Rendelés_ID": [
+        "rendelés_id", "rendeles_id", "order id", "orderid", "order_id", "order",
+        "order no", "orderno", "sales order", "salesorder", "po", "rendelés", "rendeles",
+        "rendelésszám", "rendelesszam"
+    ],
+    "Vevő": [
+        "vevő", "vevo", "customer", "customer name", "customername", "client",
+        "partner", "partnernév", "partnernev"
+    ],
+    "Rendelt_db": [
+        "rendelt_db", "rendelt db", "ordered qty", "orderedqty", "order qty", "orderqty",
+        "qty ordered", "qtyordered", "quantity", "qty", "mennyiség", "mennyiseg", "igény", "igeny"
+    ],
+    "Határidő": [
+        "határidő", "hatarido", "due date", "duedate", "deadline", "required date",
+        "requireddate", "delivery date", "deliverydate", "szállítási határidő", "szallitasi hatarido",
+        "szállítás", "szallitas"
+    ],
+    "Prioritás": [
+        "prioritás", "prioritas", "priority", "sürgősség", "surgosseg", "fontosság", "fontossag"
+    ],
+}
 def _norm_col_name(x: str) -> str:
-    txt = str(x or "").strip().lower()
+    txt = str(x or "").strip()
+    # CamelCase bontás: ProductionDate -> Production Date
+    txt = re.sub(r"(?<=[a-záéíóöőúüű])(?=[A-ZÁÉÍÓÖŐÚÜŰ])", " ", txt)
+    txt = txt.lower()
     replacements = {
         "á": "a", "é": "e", "í": "i", "ó": "o", "ö": "o", "ő": "o",
         "ú": "u", "ü": "u", "ű": "u",
-        "_": " ", "-": " ", ".": " ", "/": " "
+        "_": " ", "-": " ", ".": " ", "/": " ", "\\": " ", "(": " ", ")": " "
     }
     for a, b in replacements.items():
         txt = txt.replace(a, b)
+    txt = re.sub(r"[^a-z0-9 ]+", " ", txt)
     return " ".join(txt.split())
+
+
+def _compact_norm(x: str) -> str:
+    return _norm_col_name(x).replace(" ", "")
 
 def auto_map_columns(df: pd.DataFrame, required_cols: List[str]) -> Dict[str, str]:
     """Megpróbálja automatikusan standard oszlopokra mappelni a feltöltött Excel oszlopait."""
     result = {}
     normalized_existing = {_norm_col_name(c): c for c in df.columns}
+    compact_existing = {_compact_norm(c): c for c in df.columns}
+
     for standard in required_cols:
         candidates = [standard] + COLUMN_SYNONYMS.get(standard, [])
         found = None
+
+        # 1) teljes normalizált egyezés
         for cand in candidates:
             n = _norm_col_name(cand)
             if n in normalized_existing:
                 found = normalized_existing[n]
                 break
+
+        # 2) kompakt egyezés: GoodQty == good qty, ProductionDate == production date
         if found is None:
-            # részleges egyezés
+            for cand in candidates:
+                cn = _compact_norm(cand)
+                if cn in compact_existing:
+                    found = compact_existing[cn]
+                    break
+
+        # 3) részleges egyezés normalizált és kompakt formában
+        if found is None:
+            cand_norms = [_norm_col_name(c) for c in candidates]
+            cand_compacts = [_compact_norm(c) for c in candidates]
             for n_existing, original in normalized_existing.items():
-                if any(_norm_col_name(cand) in n_existing or n_existing in _norm_col_name(cand) for cand in candidates):
+                n_compact = n_existing.replace(" ", "")
+                if any(c and (c in n_existing or n_existing in c) for c in cand_norms):
                     found = original
                     break
+                if any(c and (c in n_compact or n_compact in c) for c in cand_compacts):
+                    found = original
+                    break
+
         result[standard] = found
+
     return result
 
 def find_sheet_by_hints(sheets: Dict[str, pd.DataFrame], role: str, fallback_index: int = 0) -> str:
     hints = STANDARD_SHEET_HINTS.get(role, [])
-    lower = {str(k).lower(): k for k in sheets.keys()}
-    for sheet_lower, original in lower.items():
-        if any(h in sheet_lower for h in hints):
+    hint_norms = [_norm_col_name(h) for h in hints]
+    for original in sheets.keys():
+        sheet_norm = _norm_col_name(original)
+        if any(h in sheet_norm for h in hint_norms):
             return original
     names = list(sheets.keys())
     return names[min(fallback_index, len(names)-1)]
@@ -3100,7 +3202,7 @@ def check_password():
     if st.session_state.password_ok:
         return True
 
-    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS V18.1 V4.1 V2 SaaS")
+    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS V20 V4.1 V2 SaaS")
     st.caption("Tesztjelszó alapértelmezetten: demo-pro-123. Élesben Streamlit Secrets: APP_PASSWORD.")
     pw = st.text_input("Jelszó", type="password")
     if st.button("Belépés"):
@@ -3253,6 +3355,221 @@ def load_saved_workbooks_from_supabase():
         return pd.DataFrame()
 
 
+
+
+def get_current_company_id_safe():
+    """Biztonságos company_id lekérés."""
+    try:
+        ctx = st.session_state.get("company_context", {})
+        if ctx and ctx.get("company_id"):
+            return ctx.get("company_id")
+    except Exception:
+        pass
+    try:
+        if "company_context" in globals() and company_context and company_context.get("company_id"):
+            return company_context.get("company_id")
+    except Exception:
+        pass
+    return None
+
+
+def save_import_profile_to_supabase(profile_name: str, sheet_mapping: dict, column_mapping: dict):
+    """Céges import profil mentése: első manuális mapping után később automatikusan használható."""
+    client = get_supabase_data_client()
+    company_id = get_current_company_id_safe()
+    if client is None or not company_id:
+        return None
+    payload = {
+        "company_id": company_id,
+        "profile_name": profile_name or "default",
+        "sheet_mapping": sheet_mapping or {},
+        "column_mapping": column_mapping or {},
+        "updated_at": datetime.now().isoformat(timespec="seconds"),
+    }
+    try:
+        return client.table("import_profiles").upsert(payload, on_conflict="company_id,profile_name").execute()
+    except Exception as exc:
+        st.warning(f"Import profil mentése sikertelen: {exc}")
+        return None
+
+
+def load_import_profiles_from_supabase():
+    """Céges import profilok listázása."""
+    client = get_supabase_data_client()
+    company_id = get_current_company_id_safe()
+    if client is None or not company_id:
+        return pd.DataFrame()
+    try:
+        res = (
+            client.table("import_profiles")
+            .select("*")
+            .eq("company_id", company_id)
+            .order("updated_at", desc=True)
+            .execute()
+        )
+        return pd.DataFrame(res.data or [])
+    except Exception as exc:
+        st.warning(f"Import profilok betöltése sikertelen: {exc}")
+        return pd.DataFrame()
+
+
+def get_selected_import_profile():
+    """Sidebarban kiválasztott import profil sessionből."""
+    return st.session_state.get("selected_import_profile_data", None)
+
+
+def normalize_mapping_payload(mapping_payload):
+    if mapping_payload is None:
+        return {}
+    if isinstance(mapping_payload, dict):
+        return mapping_payload
+    try:
+        return json.loads(mapping_payload)
+    except Exception:
+        return {}
+
+
+CORE_REQUIRED_PROD_COLS = ["Dátum", "Gép", "Termék", "Gyártott_db"]
+IMPORTANT_PROD_COLS = ["Dolgozó", "Műszak", "Selejt_db", "Állásidő_perc"]
+OPTIONAL_FEATURE_NOTICE = {
+    "Dolgozó": "Dolgozó-gép ajánlórendszer korlátozott vagy nem elérhető.",
+    "Műszak": "Műszak-összehasonlítás nem elérhető.",
+    "Selejt_db": "Selejt- és minőségmodul becsült vagy nem elérhető.",
+    "Állásidő_perc": "Állásidő és OEE gyökérok elemzés korlátozott.",
+}
+
+
+def validate_columns_soft(df: pd.DataFrame, required_cols: List[str], label: str, core_cols: List[str] = None):
+    """Hiányzó oszlopok kezelése profibban: core oszlopnál stop, egyébként figyelmeztetés."""
+    if df is None or df.empty:
+        st.error(f"{label}: nincs betöltött adat.")
+        st.stop()
+
+    core_cols = core_cols or required_cols
+    missing_core = [c for c in core_cols if c not in df.columns]
+    missing_other = [c for c in required_cols if c not in df.columns and c not in missing_core]
+
+    if missing_core:
+        st.error(f"{label}: kötelező oszlop hiányzik: {', '.join(missing_core)}")
+        st.info("Ezek nélkül az alap termelési elemzés nem készíthető el. Használd az import mappinget.")
+        st.stop()
+
+    if missing_other:
+        st.warning(f"{label}: nem kötelező, de hasznos oszlopok hiányoznak: {', '.join(missing_other)}")
+        for c in missing_other:
+            if c in OPTIONAL_FEATURE_NOTICE:
+                st.caption(f"• {c}: {OPTIONAL_FEATURE_NOTICE[c]}")
+
+
+def add_missing_optional_columns(df: pd.DataFrame, cols: List[str]) -> pd.DataFrame:
+    """Hiányzó opcionális oszlopok pótlása, hogy a downstream kód ne omoljon össze."""
+    out = df.copy()
+    for c in cols:
+        if c not in out.columns:
+            if c in ["Selejt_db", "Állásidő_perc"]:
+                out[c] = 0
+            elif c == "Dolgozó":
+                out[c] = "Ismeretlen dolgozó"
+            elif c == "Műszak":
+                out[c] = "N/A"
+            else:
+                out[c] = None
+    return out
+
+
+def apply_saved_import_profile_to_sheets(sheets: Dict[str, pd.DataFrame], profile: dict):
+    """Mentett profil alkalmazása sheet + column mappingre.
+
+    Visszaadja: prod_raw, machines_raw, products_raw, orders_raw
+    """
+    if not profile:
+        return None
+
+    sheet_mapping = normalize_mapping_payload(profile.get("sheet_mapping"))
+    column_mapping = normalize_mapping_payload(profile.get("column_mapping"))
+
+    def get_sheet(role, fallback_role, fallback_index):
+        name = sheet_mapping.get(role)
+        if name and name in sheets:
+            return sheets[name].copy()
+        return sheets[find_sheet_by_hints(sheets, fallback_role, fallback_index)].copy()
+
+    prod_raw = get_sheet("production", "production", 0)
+    machines_raw = get_sheet("machines", "machines", 1)
+    products_raw = get_sheet("products", "products", 2)
+    orders_raw = get_sheet("orders", "orders", 3) if len(sheets) > 3 else None
+
+    def rename_by_role(df, role):
+        mp = column_mapping.get(role, {}) if isinstance(column_mapping, dict) else {}
+        reverse = {v: k for k, v in mp.items() if v}
+        # saved as standard -> source; rename source -> standard
+        rename_map = {src: std for std, src in mp.items() if src in df.columns}
+        return df.rename(columns=rename_map)
+
+    prod_raw = rename_by_role(prod_raw, "production")
+    machines_raw = rename_by_role(machines_raw, "machines")
+    products_raw = rename_by_role(products_raw, "products")
+    if orders_raw is not None:
+        orders_raw = rename_by_role(orders_raw, "orders")
+
+    return prod_raw, machines_raw, products_raw, orders_raw
+
+
+def build_current_mapping_payload(prod_raw, machines_raw, products_raw, orders_raw):
+    """Aktuális automatikus/manuális mappingből menthető payload."""
+    payload = {
+        "production": auto_map_columns(prod_raw, REQUIRED_PROD_COLS) if prod_raw is not None else {},
+        "machines": auto_map_columns(machines_raw, REQUIRED_MACHINE_COLS) if machines_raw is not None else {},
+        "products": auto_map_columns(products_raw, REQUIRED_PRODUCT_COLS) if products_raw is not None else {},
+        "orders": auto_map_columns(orders_raw, OPTIONAL_ORDER_COLS) if orders_raw is not None and not orders_raw.empty else {},
+    }
+    return payload
+
+
+def get_latest_saved_workbook_row():
+    """Legutóbbi mentett Excel rekord lekérése belépéskor automatikus induláshoz."""
+    client = get_supabase_data_client()
+    if client is None:
+        return None
+    ctx = st.session_state.get("company_context", {})
+    company_id = ctx.get("company_id")
+    if not company_id:
+        return None
+    try:
+        res = (
+            client.table("uploaded_workbooks")
+            .select("id, week, file_name, uploaded_at")
+            .eq("company_id", company_id)
+            .order("uploaded_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        data = res.data or []
+        return data[0] if data else None
+    except Exception:
+        return None
+
+
+def autoload_latest_saved_workbook_if_needed(uploaded):
+    """Ha nincs friss feltöltés, automatikusan betölti az utolsó mentett Excelt."""
+    if uploaded is not None:
+        return
+    if st.session_state.get("saved_workbook_tmp_path"):
+        return
+    latest = get_latest_saved_workbook_row()
+    if not latest:
+        return
+    loaded = get_saved_workbook_bytes(latest.get("id"))
+    if not loaded:
+        return
+    raw_bytes, saved_name, saved_week = loaded
+    st.session_state["saved_workbook_tmp_path"] = bytes_to_temp_xlsx(raw_bytes)
+    st.session_state["saved_workbook_name"] = saved_name
+    st.session_state["saved_workbook_week"] = saved_week
+    st.session_state["week_label_input"] = str(saved_week)
+    st.session_state["autoloaded_latest_week"] = str(saved_week)
+
+
 def delete_saved_workbook_from_supabase(workbook_id):
     """Mentett Excel törlése Supabase-ből."""
     client = get_supabase_data_client()
@@ -3326,7 +3643,7 @@ def save_current_period_full(uploaded_file, period_label: str, company_name: str
 
 
 def save_week_snapshot(company, week_label, kpis, uploaded_name=""):
-    """PRO V18.1: Supabase mentés service role data clienttel, ha elérhető."""
+    """PRO V20: Supabase mentés service role data clienttel, ha elérhető."""
     if st.session_state.get("readonly_mode"):
         raise RuntimeError("Az előfizetés lejárt vagy inaktív. Új mentés nem engedélyezett.")
 
@@ -3452,7 +3769,7 @@ def login_required_pro():
     if st.session_state.get("pro_user"):
         return sb, st.session_state["pro_user"]
 
-    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS V18.1 V4.1 V2 SaaS")
+    st.markdown("## 🔐 Gyártási Diagnosztika PRO SaaS V20 V4.1 V2 SaaS")
     st.caption("Előfizetőknek: belépés email + jelszóval. Fiókot az admin hoz létre az ügyfélnek.")
     email = st.text_input("Email", key="pro_login_email")
     password = st.text_input("Jelszó", type="password", key="pro_login_password")
@@ -3583,7 +3900,7 @@ st.session_state["readonly_mode"] = readonly_mode
 # ------------------------------------------------------------
 # Header
 # ------------------------------------------------------------
-st.markdown('<div class="main-title">🏭 Gyártási Diagnosztika PRO SaaS V18.1 V4.1 V2 SaaS</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">🏭 Gyártási Diagnosztika PRO SaaS V20 V4.1 V2 SaaS</div>', unsafe_allow_html=True)
 st.markdown('<div class="subtitle">PRO SaaS verzió: emailes belépés, céges jogosultság, előfizetés-kezelés, tartós többhetes trendek és read-only mód lejárat után.</div>', unsafe_allow_html=True)
 
 
@@ -3624,6 +3941,8 @@ if uploaded is None and st.session_state.get("saved_workbook_tmp_path"):
     active_uploaded_source = st.session_state.get("saved_workbook_tmp_path")
     active_uploaded_name = st.session_state.get("saved_workbook_name", "saved.xlsx")
 current_upload_name = active_uploaded_name if active_uploaded_name else (uploaded.name if uploaded is not None else "")
+if st.session_state.get("autoloaded_latest_week"):
+    st.info(f"Automatikusan betöltve az utolsó mentett hét: {st.session_state.get('autoloaded_latest_week')}")
 
 # ------------------------------------------------------------
 # Adatbetöltés
@@ -3631,12 +3950,35 @@ current_upload_name = active_uploaded_name if active_uploaded_name else (uploade
 try:
     sheets = safe_read_excel(uploaded)
 
-    # PRO.4.3.2: Excel Mapper - eltérő nevű oszlopok/munkalapok esetén is standardizál
-    prod_raw, machines_raw, products_raw, orders_raw = render_mapper_ui(sheets)
+    # PRO V20: Excel Mapper + mentett import profil
+    selected_profile = get_selected_import_profile()
+    applied = apply_saved_import_profile_to_sheets(sheets, selected_profile) if selected_profile else None
 
-    validate_columns(prod_raw, REQUIRED_PROD_COLS, "Termeles")
-    validate_columns(machines_raw, REQUIRED_MACHINE_COLS, "Gepek")
-    validate_columns(products_raw, REQUIRED_PRODUCT_COLS, "Termekek")
+    if applied is not None:
+        prod_raw, machines_raw, products_raw, orders_raw = applied
+        st.success("Mentett import profil alkalmazva.")
+    else:
+        prod_raw, machines_raw, products_raw, orders_raw = render_mapper_ui(sheets)
+
+    validate_columns_soft(prod_raw, REQUIRED_PROD_COLS, "Termeles", CORE_REQUIRED_PROD_COLS)
+    validate_columns_soft(machines_raw, REQUIRED_MACHINE_COLS, "Gepek", ["Gép", "Kapacitás_db_óra"])
+    validate_columns_soft(products_raw, REQUIRED_PRODUCT_COLS, "Termekek", ["Termék"])
+
+    prod_raw = add_missing_optional_columns(prod_raw, REQUIRED_PROD_COLS)
+    machines_raw = add_missing_optional_columns(machines_raw, REQUIRED_MACHINE_COLS)
+    products_raw = add_missing_optional_columns(products_raw, REQUIRED_PRODUCT_COLS)
+
+    if st.sidebar.button("Aktuális import mapping mentése profilként", use_container_width=True, key="save_import_profile_v20"):
+        profile_name = st.sidebar.text_input("Profilnév", value="default", key="import_profile_name_v20")
+        sheet_payload = {
+            "production": find_sheet_by_hints(sheets, "production", 0),
+            "machines": find_sheet_by_hints(sheets, "machines", 1),
+            "products": find_sheet_by_hints(sheets, "products", 2),
+            "orders": find_sheet_by_hints(sheets, "orders", 3) if len(sheets) > 3 else "",
+        }
+        column_payload = build_current_mapping_payload(prod_raw, machines_raw, products_raw, orders_raw)
+        save_import_profile_to_supabase(profile_name, sheet_payload, column_payload)
+        st.sidebar.success("Import profil mentve.")
 
     df = prepare_data(prod_raw, machines_raw, products_raw)
     orders_df = normalize_orders(orders_raw) if orders_raw is not None else pd.DataFrame(columns=OPTIONAL_ORDER_COLS)
@@ -4288,8 +4630,8 @@ with tabs[7]:
 # 9. PRO trendek
 # ------------------------------------------------------------
 with tabs[8]:
-    st.subheader("PRO V18.1 trendmotor és mentett riportok")
-    st.caption("A DEMO egyszeri képet ad. A PRO V18.1 több időszak alapján mutatja: javulás, romlás, trend, előző időszakhoz képesti eltérés.")
+    st.subheader("PRO V20 trendmotor és mentett riportok")
+    st.caption("A DEMO egyszeri képet ad. A PRO V20 több időszak alapján mutatja: javulás, romlás, trend, előző időszakhoz képesti eltérés.")
 
     st.info(
         "Az adatkezelés mostantól a bal oldali sávban történik: Excel feltöltés, mentés, betöltés és törlés. "
@@ -4316,7 +4658,7 @@ with tabs[8]:
         else:
             st.dataframe(delta_df, use_container_width=True, hide_index=True)
 
-        st.markdown("### PRO V18.1 automatikus trendértékelés")
+        st.markdown("### PRO V20 automatikus trendértékelés")
         render_recommendations(build_trend_insights(hist))
 
         st.markdown("### Trenddiagramok")
