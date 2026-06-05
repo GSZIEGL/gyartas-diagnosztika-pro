@@ -10,6 +10,7 @@ def safe_completion_pct(planned, demand):
 
 
 import io
+import re
 import os
 import json
 import base64
